@@ -38,6 +38,12 @@ class AudioUnitTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'not installed'):audio.validate_modes(spec)
         with self.assertRaisesRegex(ValueError,'无效'):audio.validate_modes({'voice_mode':'magic'})
 
+    def test_no_bgm_skips_music_ai_but_still_requires_video_ai(self):
+        with patch('videocut.audio.require_model',side_effect=ValueError('not installed')):
+            self.assertEqual(audio.validate_modes({'music_voice_mode':'instrumental'},has_music=False)['music_voice_mode'],'keep')
+            with self.assertRaisesRegex(ValueError,'not installed'):
+                audio.validate_modes({'voice_mode':'reduce'},has_music=False)
+
     def test_stft_roundtrip_has_no_delay_or_channel_swap(self):
         transform=Spectrogram(n_fft=512,hop=128,bins=257)
         signal=np.random.default_rng(41).normal(size=(2,4096)).astype(np.float32)

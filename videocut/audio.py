@@ -16,9 +16,9 @@ MUSIC_VOICE_MODES = ('keep','instrumental')
 CACHE = ROOT/'work'/'audio-cache'
 
 
-def validate_modes(spec):
+def validate_modes(spec, *, has_music=True):
     voice = spec.get('voice_mode','keep')
-    music = spec.get('music_voice_mode','keep')
+    music = spec.get('music_voice_mode','keep') if has_music else 'keep'
     if voice not in VOICE_MODES or music not in MUSIC_VOICE_MODES:
         raise ValueError('人声处理方式无效。')
     track = None
@@ -121,14 +121,16 @@ def reduce_voice(source, destination, ctx, label, low, high):
 def prepare_audio(cfg, meta, clips, duration, scratch, ctx):
     track = validate_tracks(cfg,meta)
     ctx.update('提取入选片段声音',51)
-    game, music = scratch/'game-original.wav', scratch/'music-original.wav'
+    game = scratch/'game-original.wav'
+    music = scratch/'music-original.wav' if cfg['music'] else None
     def game_chunks():
         for i,clip in enumerate(clips):
             ctx.update('提取入选片段声音',51+3*i/len(clips),f'{i+1} / {len(clips)}')
             yield pcm_segment(cfg['video'],clip['start'],clip['duration'],track,ctx) if meta['audio_tracks'] else b'\0'*(round(clip['duration']*SAMPLE_RATE)*4)
     write_pcm(game,game_chunks())
-    write_pcm(music,[pcm_segment(cfg['music'],cfg['music_start'],duration,0,ctx)])
-    report={'game':{'mode':cfg['voice_mode'],'audio_track':track if meta['audio_tracks'] else None},'music':{'mode':cfg['music_voice_mode']}}
+    if music is not None:
+        write_pcm(music,[pcm_segment(cfg['music'],cfg['music_start'],duration,0,ctx)])
+    report={'game':{'mode':cfg['voice_mode'],'audio_track':track if meta['audio_tracks'] else None},'music':{'mode':cfg['music_voice_mode'] if music is not None else 'none'}}
     warnings=[]
     if cfg['voice_mode']=='reduce' and meta['audio_tracks']:
         game,details=reduce_voice(game,scratch/'game-clean.wav',ctx,'AI 减弱录像人声',55,65)
@@ -138,7 +140,7 @@ def prepare_audio(cfg, meta, clips, duration, scratch, ctx):
         warnings.append(f'已使用原片第 {track+1} 条音轨；请确认该轨只包含游戏声，工具不会自动判断音轨内容。')
     elif cfg['voice_mode']=='reduce':
         report['game']['skipped']='no_audio'
-    if cfg['music_voice_mode']=='instrumental':
+    if music is not None and cfg['music_voice_mode']=='instrumental':
         music,details=reduce_voice(music,scratch/'music-clean.wav',ctx,'AI 提取 BGM 伴奏',65,74)
         report['music'].update(details)
         warnings.append('BGM 已经 AI 提取伴奏，可能仍有少量人声或乐器损失。')
@@ -147,6 +149,16 @@ def prepare_audio(cfg, meta, clips, duration, scratch, ctx):
 
 
 def mix_and_mux(concat, game, music, impacts, duration, cfg, destination, ctx):
-    fade_start=max(0,duration-.5)
-    graph=f'[1:a]volume={cfg["game_volume"]}[game];[2:a]atrim=duration={duration},asetpts=PTS-STARTPTS,volume={cfg["music_volume"]},afade=t=in:d=0.15,afade=t=out:st={fade_start}:d=0.5[music];[game][music][3:a]amix=inputs=3:duration=first:normalize=0,alimiter=limit=0.95:level=0:latency=1[a]'
-    run(ffmpeg_args()+['-f','concat','-safe','0','-i',concat,'-i',game,'-i',music,'-i',impacts,'-filter_complex',graph,'-map','0:v:0','-map','[a]','-c:v','copy','-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-t',str(duration),'-movflags','+faststart',destination],ctx,900)
+    inputs=['-f','concat','-safe','0','-i',concat,'-i',game]
+    filters=[f'[1:a]volume={cfg["game_volume"]}[game]']
+    sources='[game]'
+    impact_index=2
+    if music is not None:
+        inputs += ['-i',music]
+        fade_start=max(0,duration-.5)
+        filters.append(f'[2:a]atrim=duration={duration},asetpts=PTS-STARTPTS,volume={cfg["music_volume"]},afade=t=in:d=0.15,afade=t=out:st={fade_start}:d=0.5[music]')
+        sources += '[music]'
+        impact_index=3
+    inputs += ['-i',impacts]
+    filters.append(f'{sources}[{impact_index}:a]amix=inputs={impact_index}:duration=first:normalize=0,alimiter=limit=0.95:level=0:latency=1[a]')
+    run(ffmpeg_args()+inputs+['-filter_complex',';'.join(filters),'-map','0:v:0','-map','[a]','-c:v','copy','-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-t',str(duration),'-movflags','+faststart',destination],ctx,900)

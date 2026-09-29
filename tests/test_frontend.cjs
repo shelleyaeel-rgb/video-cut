@@ -7,15 +7,15 @@ const {randomUUID} = require('node:crypto');
 const code = fs.readFileSync(require('node:path').join(__dirname,'../web/app.js'),'utf8');
 const settle = async () => {await new Promise(setImmediate);await new Promise(setImmediate);};
 
-function page({storage=new Map(),online=true,serverFailure=false,audioReady=true,token='private-session-token'}={}) {
+function page({storage=new Map(),online=true,serverFailure=false,audioReady=true,token='private-session-token',onRequest}={}) {
   const nodes=new Map(), events={}, reports=[], requests=[];
   function node(id) {
-    if (!nodes.has(id)) nodes.set(id,{value:['voice-mode','music-voice-mode'].includes(id)?'keep':'',textContent:'',hidden:true,handlers:{},addEventListener(name,fn){this.handlers[name]=fn;},getContext(){return {};},append(){},after(){},replaceChildren(){},add(){},pause(){}});
+    if (!nodes.has(id)) nodes.set(id,{value:['voice-mode','music-voice-mode'].includes(id)?'keep':'',textContent:'',hidden:true,handlers:{},children:[],addEventListener(name,fn){this.handlers[name]=fn;},getContext(){return {};},append(child){this.children.push(child);},after(){},replaceChildren(){this.children=[];},add(){},pause(){}});
     return nodes.get(id);
   }
   const response = (body,status=200) => ({status,ok:status<400,json:async()=>body});
   const context=vm.createContext({
-    document:{getElementById:node,querySelector:()=>({content:token}),createElement:()=>node(randomUUID())},
+    document:{getElementById:node,querySelector:()=>({content:token}),createElement:()=>node(randomUUID()),createTextNode:text=>({textContent:text})},
     window:{addEventListener:(name,fn)=>events[name]=fn},
     sessionStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},
     crypto:{randomUUID},Option:function(){},setInterval(){},setTimeout,clearTimeout,AbortSignal,
@@ -25,6 +25,7 @@ function page({storage=new Map(),online=true,serverFailure=false,audioReady=true
       if (path==='/api/state') return response({profiles:[],active:null,logs:{write_error:false},audio:{ready:audioReady}});
       if (path==='/api/client-error') {reports.push(JSON.parse(options.body));return response({ok:true,logs:{write_error:false}});}
       if (path==='/api/generate' && serverFailure) return response({error:'invalid test video',request_id:'request-test-id'},400);
+      if (onRequest) return response(await onRequest(path, options?.body?JSON.parse(options.body):null));
       throw new Error('unexpected test request: '+path);
     }
   });
@@ -102,4 +103,99 @@ test('video and music voice settings are sent independently',async()=>{
   await p.node('generate').handlers.click();await settle();
   const sent=p.requests.find(r=>r.path==='/api/generate').body;
   assert.equal(sent.voice_mode,'reduce');assert.equal(sent.music_voice_mode,'keep');
+});
+
+test('blank BGM submits with video and profile even with stale BGM AI settings',async()=>{
+  const p=page({serverFailure:true,audioReady:false});await settle();
+  p.node('video').value='test.mp4';p.node('profile').value='demo';p.node('music').value='  ';
+  p.node('music-voice-mode').value='instrumental';p.node('music-start').value='bad';
+  await p.node('generate').handlers.click();await settle();
+  const sent=p.requests.find(r=>r.path==='/api/generate').body;
+  assert.equal(sent.music,'');assert.equal(sent.music_start,0);assert.equal(sent.music_volume,0);assert.equal(sent.music_voice_mode,'keep');
+});
+
+test('adding and clearing BGM toggles only music controls',async()=>{
+  const p=page();await settle();
+  const controls=['music-start','music-volume','music-voice-mode','clear-music'];
+  controls.forEach(id=>assert.equal(p.node(id).disabled,true));
+  p.node('music').value='test.wav';p.node('music').handlers.input();
+  controls.forEach(id=>assert.equal(p.node(id).disabled,false));
+  p.node('clear-music').handlers.click();
+  assert.equal(p.node('music').value,'');assert.match(p.node('music-info').textContent,/未添加 BGM/);
+  controls.forEach(id=>assert.equal(p.node(id).disabled,true));
+  assert.notEqual(p.node('voice-mode').disabled,true);
+  assert.notEqual(p.node('game-volume').disabled,true);
+});
+
+function profileResult(events=[]) {
+  return {video:'test.mp4',profile:'demo',profile_name:'测试模板',threshold:.82,start:8,duration:8,requested_duration:8,events,elapsed_seconds:.2};
+}
+function fillProfileTest(p) {
+  for(const [id,value] of Object.entries({video:'test.mp4',profile:'demo','test-start':'8','test-duration':'8',threshold:'.82'})) p.node(id).value=value;
+}
+
+test('profile testing ignores music and AI settings, shows empty results, and preserves montage',async()=>{
+  const p=page({audioReady:false,onRequest:async(path)=>{
+    if(path==='/api/test-profile')return {id:'test-job'};
+    if(path.startsWith('/api/job'))return {id:'test-job',kind:'profile_test',state:'complete',stage:'配置测试完成',progress:100,result:profileResult()};
+    throw new Error(path);
+  }});await settle();fillProfileTest(p);
+  p.node('music').value='missing.wav';p.node('voice-mode').value='reduce';
+  p.node('result-video').src='previous.mp4';p.node('result-video').hidden=false;
+  await p.node('test-profile').handlers.click();await settle();
+  assert.deepEqual(p.requests.find(r=>r.path==='/api/test-profile').body,{video:'test.mp4',profile:'demo',start:8,duration:8,threshold:.82});
+  assert.match(p.node('test-status').textContent,/未找到候选事件/);
+  assert.equal(p.node('test-result').hidden,false);
+  assert.equal(p.node('result-video').src,'previous.mp4');assert.equal(p.node('result-video').hidden,false);
+  assert.ok(!p.requests.some(r=>r.path==='/api/generate'));
+});
+
+test('profile test rejects invalid duration before submitting',async()=>{
+  const p=page();await settle();fillProfileTest(p);p.node('test-duration').value='600';
+  await p.node('test-profile').handlers.click();await settle();
+  assert.match(p.node('error').textContent,/测试时长/);
+  assert.ok(!p.requests.some(r=>r.path==='/api/test-profile'));
+});
+
+test('event preview uses source time and stale frame responses cannot restore invalidated results',async()=>{
+  let resolveFrame;
+  const p=page({onRequest:async(path)=>{
+    if(path==='/api/test-profile')return {id:'test-job'};
+    if(path.startsWith('/api/job'))return {kind:'profile_test',state:'complete',progress:100,result:profileResult([{time:10,end:10.8,confidence:.97}])};
+    if(path==='/api/frame')return new Promise(resolve=>{resolveFrame=resolve;});
+    throw new Error(path);
+  }});await settle();fillProfileTest(p);
+  await p.node('test-profile').handlers.click();await settle();
+  const click=p.node('test-events').children[0].children[0].handlers.click();await settle();
+  assert.deepEqual(p.requests.find(r=>r.path==='/api/frame').body,{video:'test.mp4',time:10});
+  p.node('threshold').value='.9';p.node('threshold').handlers.input();
+  resolveFrame({image:'data:image/png;base64,old'});await click;await settle();
+  assert.equal(p.node('test-result').hidden,true);assert.equal(p.node('test-frame').hidden,true);
+  assert.match(p.node('test-status').textContent,/重新测试/);
+});
+
+test('classification evidence and manual exclusions are sent to generation and cleared on changes',async()=>{
+  const result={...profileResult([
+    {time:10,end:10.5,confidence:.96,classification:'unknown',reason:'依据冲突',event_types:['kill'],matches:[{name:'共同图标'}],evidence:[{name:'玩家标记',confidence:.95},{name:'小兵标记',confidence:.96}]},
+    {time:12,end:12.5,confidence:.97,classification:'npc',reason:'小兵依据',event_types:['kill'],matches:[{name:'共同图标'}],evidence:[]}
+  ]),review_signature:'review-fixture'};
+  const p=page({serverFailure:true,onRequest:async(path)=>{
+    if(path==='/api/test-profile')return {id:'test-job'};
+    if(path.startsWith('/api/job'))return {kind:'profile_test',state:'complete',progress:100,result};
+    throw new Error(path);
+  }});await settle();fillProfileTest(p);
+  await p.node('test-profile').handlers.click();await settle();
+  const rows=p.node('test-events').children;
+  assert.match(rows[0].children[0].textContent,/待确认/);
+  assert.match(rows[0].children[1].textContent,/依据冲突.*玩家标记.*小兵标记/);
+  assert.match(rows[1].children[0].textContent,/小兵.*自动过滤/);
+  assert.equal(rows[1].children.length,2);
+  const checkbox=rows[0].children[2].children[0];checkbox.checked=true;checkbox.handlers.change();
+  assert.match(p.node('review-status').textContent,/排除 1/);
+  await p.node('generate').handlers.click();await settle();
+  assert.deepEqual(p.requests.find(r=>r.path==='/api/generate').body.review,{signature:'review-fixture',excluded:[[10,10.5]]});
+  p.node('threshold').value='.9';p.node('threshold').handlers.input();
+  await p.node('generate').handlers.click();await settle();
+  assert.equal(p.requests.filter(r=>r.path==='/api/generate').at(-1).body.review,undefined);
+  assert.match(p.node('review-status').textContent,/排除 0/);
 });

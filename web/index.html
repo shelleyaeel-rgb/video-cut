@@ -9,7 +9,7 @@
 <body>
 <header class="topbar"><a class="brand" href="/"><span class="brand-mark">▰</span> 烽火剪辑 <small>LOCAL STUDIO</small></a><span class="local"><i></i> 仅在本机处理 <span class="version">v0.1 原型</span></span></header>
 <main>
-  <section class="heading"><div class="eyebrow">从完整录像，到你的高光</div><h1>把精彩，剪到节拍上。</h1><p>选录像、配音乐，生成属于你的击杀混剪。</p><button type="button" class="secondary demo-button" id="demo">没有素材？体验合成演示 <span>↗</span></button></section>
+  <section class="heading"><div class="eyebrow">从完整录像，到你的高光</div><h1>把精彩，剪成你的高光。</h1><p>选录像生成混剪，也可以添加音乐，跟随节拍剪辑。</p><button type="button" class="secondary demo-button" id="demo">没有素材？体验合成演示 <span>↗</span></button></section>
   <div class="diagnostics"><button type="button" class="secondary" id="open-logs">打开日志文件夹</button><a class="text-button" id="download-logs" download="videocut-logs.zip">下载日志</a><span id="log-status" class="hint" role="status">日志保存在本机，报错时可提供错误编号。</span></div>
   <div id="error" class="notice error" role="alert" hidden></div>
   <div id="demo-note" class="notice" hidden>当前为合成素材演示：用于验证剪辑流程，不代表三角洲真实识别效果。</div>
@@ -18,13 +18,14 @@
     <div class="panel-title"><span class="step">01</span><h2>准备素材</h2></div>
     <label for="video">OBS 录像</label><div class="file-row"><input id="video" type="text" placeholder="粘贴完整路径，或点击选择" autocomplete="off"><button id="pick-video" class="secondary" type="button">选择</button></div>
     <div id="video-info" class="hint">原片保留不变，支持 MP4、MKV 等常见格式。</div>
-    <label for="music">背景音乐</label><div class="file-row"><input id="music" type="text" placeholder="选择一首你喜欢的 BGM" autocomplete="off"><button id="pick-music" class="secondary" type="button">选择</button></div>
-    <div id="music-info" class="hint">音乐和录像都保留在本机。</div>
+    <label for="music">背景音乐（可选）</label><div class="file-row"><input id="music" type="text" placeholder="留空即可生成无 BGM 版本" autocomplete="off" aria-describedby="music-info"><button id="pick-music" class="secondary" type="button">选择</button></div>
+    <div class="music-options"><span id="music-info" class="hint">未添加 BGM，按镜头原有节奏剪辑，保留原声和已开启的效果音。</span><button id="clear-music" class="text-button" type="button" disabled>清空 BGM</button></div>
     <div class="divider"></div>
     <div class="panel-title"><span class="step">02</span><h2>设定混剪</h2></div>
-    <label for="profile">击杀提示配置</label><select id="profile"><option value="">首次使用，请在下方标定提示图案</option></select>
-    <p class="hint">同一套画面布局可复用。更换 HUD 后需要重新标定。</p>
-    <div class="two-cols"><div><label for="target">目标时长 / 秒</label><input type="number" id="target" min="5" max="120" value="90"></div><div><label for="music-start">音乐起点 / 秒</label><input type="number" id="music-start" min="0" step="0.1" value="0"></div></div>
+    <label for="profile">游戏提示配置</label><select id="profile"><option value="">首次使用，请在下方标定提示图案</option></select>
+    <p class="hint">一个配置可包含击倒、击杀、爆头和辅助标记。更换 HUD 后需要重新标定。<a class="text-button" href="#profile-test-panel">测试此配置 ↓</a></p>
+    <details class="advanced"><summary>管理当前配置的模板</summary><div id="template-list" class="template-list"><p class="hint">请先选择配置。</p></div></details>
+    <div class="two-cols"><div><label for="target">目标时长 / 秒</label><input type="number" id="target" min="5" max="120" value="90"></div><div><label for="music-start">音乐起点 / 秒</label><input type="number" id="music-start" min="0" step="0.1" value="0" disabled></div></div>
     <p class="hint">最长 120 秒；素材不足时生成更短的集锦。</p>
     <label for="strength">特效强度 <output id="strength-value">适中</output></label><input id="strength" type="range" min="0" max="1" step="0.1" value="0.5"><div class="range-labels"><span>原片</span><span>放大 · 闪光 · 效果音</span></div>
     <details class="advanced"><summary>声音与高级设置</summary>
@@ -34,21 +35,53 @@
         <p id="voice-hint" class="hint">保留所选音轨中的游戏声和说话声，适合保留搞笑语音。</p>
         <div id="source-track-group"><label for="audio-track">原片音轨</label><select id="audio-track"><option value="0">第一条音轨</option></select></div>
         <div id="game-track-group" hidden><label for="game-audio-track">独立游戏音轨</label><select id="game-audio-track"><option value="">读取录像后，手动选择纯游戏声轨</option></select><p class="hint">需要 OBS 事先分轨录音；工具无法自动判断哪条是纯游戏声。若聊天混在所选轨里，仍会保留。</p></div>
-        <label for="music-voice-mode">BGM 人声</label><select id="music-voice-mode"><option value="keep">保留歌曲原声 · 默认</option><option value="instrumental">AI 提取伴奏 · 减弱演唱</option></select>
-        <p class="hint">录像和 BGM 分开处理。只处理入选片段与成片用到的音乐段落。</p>
+        <label for="music-voice-mode">BGM 人声</label><select id="music-voice-mode" disabled><option value="keep">保留歌曲原声 · 默认</option><option value="instrumental">AI 提取伴奏 · 减弱演唱</option></select>
+        <p class="hint">添加 BGM 后可设置音乐起点、音量和人声处理。录像和 BGM 分开处理。</p>
         <p id="audio-ai-status" class="hint" role="status">正在检查本机 AI 人声组件…</p>
         <p id="audio-setup" class="hint" hidden>安装命令：<code>.\.venv\Scripts\python.exe scripts\setup_audio.py</code></p>
-        <div class="two-cols"><div><label for="game-volume">原声音量</label><input id="game-volume" type="number" min="0" max="2" step="0.1" value="0.6"></div><div><label for="music-volume">BGM 音量</label><input id="music-volume" type="number" min="0" max="2" step="0.1" value="0.65"></div></div>
+        <div class="two-cols"><div><label for="game-volume">原声音量</label><input id="game-volume" type="number" min="0" max="2" step="0.1" value="0.6"></div><div><label for="music-volume">BGM 音量</label><input id="music-volume" type="number" min="0" max="2" step="0.1" value="0.65" disabled></div></div>
       </div>
       <label for="encoder">导出方式</label><select id="encoder"><option value="cpu">CPU · 兼容模式</option><option value="nvenc">NVIDIA · 硬件加速</option></select>
-      <label for="threshold">检测阈值</label><input id="threshold" type="number" min="0.5" max="0.99" step="0.01" value="0.82"><p class="hint">过高容易漏检，过低容易误检；建议先使用默认值。</p>
     </details>
     <button class="primary generate" id="generate" type="button">生成混剪 <span>→</span></button>
     <p class="footnote">输出 H.264 MP4 · 最高 1080p / 30 fps</p>
   </section>
   <section class="right-column">
     <section class="panel preview-panel"><div class="preview-title"><h2>成片预览</h2><span id="result-badge" class="tag">等待生成</span></div><div id="empty-preview" class="empty-preview"><span class="play-symbol">▶</span><h3>下一条高光，从这里开始</h3><p>完成左侧设置，或先体验合成演示。</p><div class="preview-bars"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div></div><video id="result-video" controls playsinline hidden></video><div id="progress-area" hidden><div class="progress-title"><strong id="stage">准备中</strong><span id="percent">0%</span></div><progress id="progress" max="100" value="0"></progress><div class="progress-bottom"><span id="detail" class="hint"></span><button type="button" class="text-button" id="cancel">取消任务</button></div></div><div id="result" hidden><div class="result-stats"><div><strong id="stat-duration">—</strong><span>成片秒数</span></div><div><strong id="stat-clips">—</strong><span>入选镜头</span></div><div><strong id="stat-events">—</strong><span>候选事件</span></div></div><ul id="warnings" class="warnings"></ul><div class="result-actions"><a class="primary" id="download" download="montage.mp4">保存成片 ↓</a><button class="secondary" id="open-output" type="button">打开输出文件夹</button></div><div id="output-path" class="hint path"></div><details class="event-details"><summary>查看镜头来源</summary><ol id="clips"></ol></details></div></section>
-    <section class="panel calibration-panel"><details id="calibration"><summary><span><span class="step">03</span> 首次标定提示图案</span><span class="muted">有真实录像后设置</span></summary><div class="calibration-body"><p class="hint">在录像里找到一次清晰的击倒提示，输入对应秒数并读取画面。拖动框选稳定的图标或文字，避开玩家名、变化数字和场景背景。配置保存后，整段录像由工具自动扫描。</p><div class="two-cols"><div><label for="frame-time">原片时间 / 秒</label><input id="frame-time" type="number" min="0" step="0.1" value="0"></div><div class="align-bottom"><button class="secondary" id="frame" type="button">读取画面</button></div></div><div id="canvas-wrap" hidden><canvas id="canvas" width="960" height="540" aria-label="拖动框选提示图案"></canvas></div><p id="selection-info" class="hint">读取画面后可框选。</p><label for="profile-name">配置名称</label><input id="profile-name" value="我的三角洲提示" maxlength="80"><button class="secondary" id="save-profile" type="button" disabled>保存提示配置</button></div></details></section>
+    <section class="panel calibration-panel"><details id="calibration"><summary><span><span class="step">03</span> 标定提示与辅助标记</span><span class="muted">多模板 · 背景蒙版</span></summary>
+      <div class="calibration-body">
+        <p class="hint">先为击倒、普通击杀、爆头分别添加事件图标；同一种图标可添加不同背景的样本。再根据实际录像添加玩家或小兵专属的稳定标记，也可以框选固定文字。</p>
+        <label for="profile-destination">保存到</label><select id="profile-destination"><option value="">新建游戏配置</option></select>
+        <label for="profile-name">新配置名称</label><input id="profile-name" value="我的三角洲提示" maxlength="80">
+        <div class="two-cols"><div><label for="template-role">模板用途</label><select id="template-role"><option value="trigger">事件图标 · 触发候选</option><option value="player">玩家辅助标记</option><option value="npc">小兵辅助标记 · 用于过滤</option></select></div><div><label for="template-type">事件类型 / 辅助标记适用类型</label><select id="template-type"><option value="kill">普通击杀</option><option value="knockdown">击倒</option><option value="headshot">爆头击杀</option><option value="other">其他提示</option><option value="all" id="template-type-all" disabled>所有事件 · 仅辅助标记</option></select></div></div>
+        <p id="helper-hint" class="hint" hidden>只选择属于本人同次事件的专属标记。共同图标、队友播报和一直显示的 HUD 不适合作为辅助依据。辅助标记需与事件同时连续命中至少两帧；没有依据或依据冲突时保留为待确认。</p>
+        <div class="two-cols"><div><label for="template-name">样本名称</label><input id="template-name" maxlength="80" placeholder="例如：普通击杀 · 亮背景"></div><div><label for="template-threshold">样本独立阈值（可选）</label><input id="template-threshold" type="number" min="0.5" max="0.99" step="0.01" placeholder="留空跟随默认阈值"></div></div>
+        <div class="two-cols"><div><label for="frame-time">原片时间 / 秒</label><input id="frame-time" type="number" min="0" step="0.1" value="0"></div><div class="align-bottom"><button class="secondary" id="frame" type="button">读取画面</button></div></div>
+        <div id="canvas-wrap" hidden><canvas id="canvas" width="960" height="540" aria-label="拖动框选提示图案"></canvas></div><p id="selection-info" class="hint">读取画面后，框选稳定图标或固定文字，避开玩家名与变化数字。</p>
+        <div class="two-cols"><div><label for="mask-mode">背景处理</label><select id="mask-mode"><option value="edges">轮廓蒙版 · 比较形状</option><option value="light">亮色前景 · 比较形状</option><option value="dark">暗色前景 · 比较形状</option><option value="full">完整灰度图 · 背景固定时</option></select></div><div><label for="mask-cutoff">前景亮度分界 / 0–255</label><input id="mask-cutoff" type="number" min="0" max="255" value="180" disabled></div></div>
+        <div class="test-actions"><button id="preview-mask" class="secondary" type="button" disabled>预览识别区域</button><button id="reset-mask" class="text-button" type="button" disabled>重置擦除</button></div>
+        <div id="mask-editor" hidden><p class="hint">棋盘格区域不参与匹配。可在下图拖动擦除残留背景；红色区域将在保存时排除。保留图标轮廓及少量周边，避免擦除过多。</p><canvas id="mask-canvas" width="200" height="80" aria-label="拖动擦除模板背景"></canvas><p id="mask-status" class="hint" role="status"></p></div>
+        <button class="secondary" id="save-profile" type="button" disabled>保存模板到配置</button>
+      </div>
+    </details></section>
+    <section class="panel profile-test-panel" id="profile-test-panel" aria-labelledby="test-title">
+      <div class="panel-title"><span class="step">04</span><h2 id="test-title">测试提示配置</h2></div>
+      <p class="hint">使用当前选中的配置，先检查一小段录像。建议同时包含有提示和无提示的画面，核对误检与漏检。仅扫描指定范围，不生成成片或保存画面缓存。</p>
+      <div class="two-cols"><div><label for="test-start">测试起点 / 秒</label><input id="test-start" type="number" min="0" step="0.1" value="0"></div><div><label for="test-duration">测试时长 / 秒</label><input id="test-duration" type="number" min="5" max="60" step="1" value="30"></div></div>
+      <label for="threshold">默认检测阈值（测试与生成共用）</label><input id="threshold" type="number" min="0.5" max="0.99" step="0.01" value="0.82"><p class="hint">设置了独立阈值的样本优先使用自己的值。过高容易漏检，过低容易误检；保存模板后再测试。</p>
+      <div class="test-actions"><button id="test-profile" class="primary" type="button">测试配置</button><button id="test-near-frame" class="secondary" type="button">使用标定时间附近</button></div>
+      <div id="test-progress-area" hidden><div class="progress-title"><strong id="test-stage">准备中</strong><span id="test-percent">0%</span></div><progress id="test-progress" max="100" value="0"></progress><div class="progress-bottom"><span id="test-detail" class="hint"></span><button id="test-cancel" class="text-button" type="button">取消测试</button></div></div>
+      <p id="test-status" class="hint" role="status" aria-live="polite">尚未测试。默认检查 30 秒，最长 60 秒；超过片尾的部分自动缩短。</p>
+      <div id="test-result" hidden>
+        <p id="test-summary" class="hint"></p><p id="test-source" class="hint path"></p>
+        <p class="hint">匹配分数表示与提示图案的相似程度，不代表击杀准确率。区间边界可能截断提示，必要时向前调整起点。</p>
+        <p class="hint">明确的小兵事件自动过滤，待确认事件默认保留。可手动排除本次测试中的事件，生成时会应用；修改录像、配置或测试参数后清空排除记录。过滤只取消该事件的剪辑触发，它仍可能出现在其他事件的前后片段中。</p><p id="review-status" class="hint" role="status"></p>
+        <ol id="test-events" class="test-events" aria-label="测试识别事件"></ol>
+        <div class="two-cols"><div><label for="test-frame-time">查看原片画面 / 秒</label><input id="test-frame-time" type="number" min="0" step="0.1" value="0"></div><div class="align-bottom"><button id="test-read-frame" class="secondary" type="button">读取此时画面</button></div></div>
+        <div class="test-actions"><button id="test-prev-frame" class="secondary" type="button">前 0.5 秒</button><button id="test-next-frame" class="secondary" type="button">后 0.5 秒</button><span id="test-frame-label" class="hint" role="status"></span></div>
+        <img id="test-frame" class="test-frame" alt="配置测试原片画面" hidden>
+      </div>
+    </section>
     <p class="prototype-note">当前版本按提示图案寻找候选事件。真实游戏准确率、小时级处理和 RTX 5080 加速待验证。</p>
   </section>
   </div>

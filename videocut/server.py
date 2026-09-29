@@ -25,9 +25,10 @@ from urllib.parse import parse_qs, urlparse
 from . import __version__, logs
 from .audio_model import status as audio_status
 from .demo import make_demo
-from .detect import list_profiles, save_profile
+from .detect import list_profiles, save_profile, prepare_template, mask_preview, saved_template_preview, update_template
 from .media import ROOT, Cancelled, Context, local_file, preview_frame, probe, run, tool_path
 from .pipeline import generate, validate
+from .profile_test import test_profile, validate_profile_test
 
 
 class App:
@@ -73,9 +74,14 @@ class App:
                 with logs.scope(**{**parent, 'task_id': ident}):
                     logs.event('tasks', 'task_started', kind=kind, settings=diagnostic_inputs(spec or {}))
                     try:
-                        result = make_demo(ctx) if kind == 'demo' else generate(spec, ctx, ident)
+                        if kind == 'demo':
+                            result = make_demo(ctx)
+                        elif kind == 'profile_test':
+                            result = test_profile(spec, ctx)
+                        else:
+                            result = generate(spec, ctx, ident)
                         ctx.check()
-                        if kind != 'demo':
+                        if kind == 'generate':
                             result['media_id'] = self.register(Path(result['output']))
                         with self.lock:
                             job.update(state='complete', progress=100, result=result)
@@ -137,7 +143,7 @@ class App:
 
 def diagnostic_inputs(data):
     """Only include configuration fields, never image data or request headers."""
-    keys = ('video', 'music', 'path', 'audio', 'profile', 'time', 'rect', 'name', 'target', 'music_start', 'game_volume', 'music_volume', 'strength', 'threshold', 'audio_track', 'encoder', 'kind', 'id', 'voice_mode', 'music_voice_mode', 'game_audio_track')
+    keys = ('video', 'music', 'path', 'audio', 'profile', 'time', 'rect', 'name', 'target', 'music_start', 'game_volume', 'music_volume', 'strength', 'threshold', 'audio_track', 'encoder', 'kind', 'id', 'voice_mode', 'music_voice_mode', 'game_audio_track', 'start', 'duration', 'profile_id', 'template_id', 'template_name', 'role', 'event_type', 'mask_mode', 'cutoff', 'sample_threshold', 'enabled')
     return {k: data[k] if isinstance(data[k], (int, float, bool, type(None))) else logs.store().clean(str(data[k]))[:2048] for k in keys if k in data}
 
 
@@ -230,6 +236,8 @@ def handler_for(app):
                 self.json({'version': __version__, 'profiles': list_profiles(), 'active': app.active, 'output_dir': str(ROOT / 'outputs'), 'logs': logs.store().status(), 'audio': audio_status()})
             elif parsed.path == '/api/job':
                 self.json(app.snapshot(query.get('id', [''])[0]))
+            elif parsed.path == '/api/template-image':
+                self.send_bytes(saved_template_preview(query.get('profile', [''])[0], query.get('template', [''])[0]), 'image/png')
             elif parsed.path == '/api/logs.zip':
                 self.send_bytes(logs.store().archive(), 'application/zip', extra={'Content-Disposition': 'attachment; filename="videocut-logs.zip"'})
             elif parsed.path == '/media':
@@ -283,10 +291,14 @@ def handler_for(app):
             self.dispatch(self.post)
 
         def post(self):
+            length = int(self.headers.get('Content-Length', 0))
             if not self.authenticated():
+                # Consume bounded input before closing, so Windows can deliver
+                # the 403 response instead of resetting a socket with unread data.
+                if 0 < length <= 65536:
+                    self.rfile.read(length)
                 self.json({'error': '请求未授权，请刷新本机页面。'}, 403)
                 return
-            length = int(self.headers.get('Content-Length', 0))
             if not 0 < length <= 65536:
                 raise ValueError('请求大小无效。')
             data = json.loads(self.rfile.read(length))
@@ -304,13 +316,33 @@ def handler_for(app):
                 self.json({'image': 'data:image/png;base64,' + base64.b64encode(preview_frame(path, float(data.get('time', 0)))).decode('ascii')})
             elif route == '/api/profile':
                 path = local_file(data.get('video', ''))
-                result = save_profile(path, float(data.get('time', 0)), data.get('rect', []), data.get('name', ''), .82)
+                with app.lock:
+                    if app.active:
+                        raise ValueError('任务运行中，请完成或取消后修改配置。')
+                    result = save_profile(path, float(data.get('time', 0)), data.get('rect', []), data.get('name', ''), .82,
+                                          profile_id=data.get('profile_id'), template_name=data.get('template_name', ''),
+                                          role=data.get('role', 'trigger'), event_type=data.get('event_type', 'kill'),
+                                          mask_mode=data.get('mask_mode', 'edges'), cutoff=data.get('cutoff', 180),
+                                          erase=data.get('erase', []), sample_threshold=data.get('sample_threshold'))
                 self.json(result)
+            elif route == '/api/template-preview':
+                path = local_file(data.get('video', ''))
+                template, mask, _, _ = prepare_template(path, float(data.get('time', 0)), data.get('rect', []),
+                                                        data.get('mask_mode', 'edges'), data.get('cutoff', 180), data.get('erase', []))
+                self.json({'image': 'data:image/png;base64,' + base64.b64encode(mask_preview(template, mask)).decode('ascii')})
+            elif route == '/api/template-update':
+                with app.lock:
+                    if app.active:
+                        raise ValueError('任务运行中，请完成或取消后修改配置。')
+                    self.json(update_template(data.get('profile'), data.get('template_id'), data.get('enabled'), data.get('threshold')))
             elif route == '/api/demo':
                 self.json(app.start('demo'), 202)
             elif route == '/api/generate':
                 validate(data)
                 self.json(app.start('generate', data), 202)
+            elif route == '/api/test-profile':
+                validate_profile_test(data)
+                self.json(app.start('profile_test', data), 202)
             elif route == '/api/cancel':
                 app.cancel(data.get('id'))
                 self.json({'ok': True})

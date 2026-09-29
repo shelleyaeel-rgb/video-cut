@@ -2,11 +2,13 @@ import math
 import threading
 import time
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from videocut.detect import scores_to_events
 from videocut.edit import plan_clips
 from videocut.media import Cancelled, Context, run
-from videocut.pipeline import finite_number
+from videocut.pipeline import finite_number, validate
 
 
 def event(t, confidence=.95):
@@ -67,6 +69,21 @@ class PlanningTests(unittest.TestCase):
         clips=plan_clips([event(8),event(18)],30,8,[3.4,7.4])
         self.assertLessEqual(sum(c['duration'] for c in clips),8)
         self.assertLess(abs(clips[0]['output_start']+8-clips[0]['start']-3.4),.04)
+
+
+class InputTests(unittest.TestCase):
+    def test_music_can_be_omitted_null_or_blank_without_ai(self):
+        for music in ({}, {'music':None}, {'music':''}, {'music':'  '}):
+            with self.subTest(music=music), patch('videocut.pipeline.local_file',return_value=Path('video.mp4')) as local, patch('videocut.pipeline.get_profile',return_value={}), patch('videocut.audio.require_model',side_effect=AssertionError('BGM AI must not run')):
+                cfg=validate({'video':'video.mp4','music_start':'invalid','music_volume':'invalid','music_voice_mode':'instrumental',**music})
+                self.assertIsNone(cfg['music'])
+                self.assertEqual(cfg['music_start'],0)
+                self.assertEqual(cfg['music_voice_mode'],'keep')
+                local.assert_called_once_with('video.mp4')
+
+    def test_nonempty_invalid_music_is_rejected(self):
+        with self.assertRaisesRegex(ValueError,'文件不存在'):
+            validate({'video':'video.mp4','music':'Z:/nonexistent-bgm.wav'})
 
 
 class CancellationTests(unittest.TestCase):

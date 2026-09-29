@@ -1,8 +1,13 @@
 import json
 import threading
 import unittest
+import tempfile
+from pathlib import Path
+import cv2
+import numpy as np
 import urllib.error
 import urllib.request
+from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 
 from videocut.media import ROOT
@@ -50,6 +55,58 @@ class HttpTests(unittest.TestCase):
     def test_invalid_input_fails_before_job(self):
         with self.request('/api/generate',{'X-Session-Token':self.app.token},{'video':'Z:/missing.mp4'}) as r:self.assertEqual(r.status,400)
         self.assertIsNone(self.app.active)
+
+    def test_profile_test_auth_and_validation(self):
+        with self.request('/api/test-profile', body={'video':'missing.mp4'}) as r:
+            self.assertEqual(r.status, 403)
+        with self.request('/api/test-profile', {'X-Session-Token':self.app.token}, {'video':'Z:/missing.mp4'}) as r:
+            self.assertEqual(r.status, 400)
+        self.assertIsNone(self.app.active)
+
+    def test_profile_test_runs_as_cancellable_job_without_montage(self):
+        result = {'video':'test.mp4', 'events':[], 'start':0, 'duration':30}
+        spec = {'video':'test.mp4', 'profile':'demo', 'duration':30}
+        media_before = dict(self.app.media)
+        with patch('videocut.server.validate_profile_test'), patch('videocut.server.test_profile', return_value=result) as test, patch('videocut.server.generate') as generate:
+            with self.request('/api/test-profile', {'X-Session-Token':self.app.token}, spec) as r:
+                self.assertEqual(r.status, 202)
+                ident = json.load(r)['id']
+            self.app.jobs[ident]['_thread'].join(2)
+            snapshot = self.app.snapshot(ident)
+            self.assertEqual(snapshot['state'], 'complete')
+            self.assertEqual(snapshot['kind'], 'profile_test')
+            self.assertEqual(snapshot['result'], result)
+            self.assertEqual(test.call_args.args[0], spec)
+            generate.assert_not_called()
+        self.assertEqual(self.app.media, media_before)
+
+    def test_template_preview_append_update_image_and_busy_guard(self):
+        image = np.full((100,160),30,np.uint8)
+        cv2.putText(image,'K',(30,70),cv2.FONT_HERSHEY_SIMPLEX,1.5,240,3)
+        png = cv2.imencode('.png',image)[1].tobytes()
+        headers = {'X-Session-Token':self.app.token}
+        spec = {'video':'fixture.mp4','time':1,'rect':[.1,.2,.5,.6],'name':'HTTP配置','template_name':'共同图标'}
+        with tempfile.TemporaryDirectory(prefix='videocut-http-') as directory, patch('videocut.detect.PROFILES',Path(directory)), patch('videocut.server.local_file',return_value=Path('fixture.mp4')), patch('videocut.detect.preview_frame',return_value=png):
+            with self.request('/api/template-preview',body=spec) as r:self.assertEqual(r.status,403)
+            with self.request('/api/template-preview',headers,spec) as r:
+                self.assertEqual(r.status,200);self.assertTrue(json.load(r)['image'].startswith('data:image/png;base64,'))
+            with self.request('/api/profile',headers,spec) as r:
+                self.assertEqual(r.status,200);profile=json.load(r)
+            with self.request('/api/profile',headers,{**spec,'profile_id':profile['id'],'role':'npc','event_type':'all','template_name':'小兵标记'}) as r:
+                self.assertEqual(r.status,200);updated=json.load(r)
+            self.assertEqual(len(updated['templates']),2)
+            helper=updated['templates'][-1]
+            with self.request('/api/template-update',headers,{'profile':profile['id'],'template_id':helper['id'],'enabled':False,'threshold':.9}) as r:
+                self.assertEqual(r.status,200);self.assertFalse(json.load(r)['templates'][-1]['enabled'])
+            image_url=f"/api/template-image?profile={profile['id']}&template={helper['id']}"
+            with self.request(image_url) as r:self.assertEqual(r.status,403)
+            with self.request(image_url,headers) as r:
+                self.assertEqual(r.status,200);self.assertEqual(r.headers['Content-Type'],'image/png')
+            self.app.active='test-busy'
+            try:
+                with self.request('/api/profile',headers,spec) as r:self.assertEqual(r.status,400)
+                with self.request('/api/template-update',headers,{'profile':profile['id'],'template_id':helper['id'],'enabled':True}) as r:self.assertEqual(r.status,400)
+            finally:self.app.active=None
 
 
 if __name__=='__main__':unittest.main()

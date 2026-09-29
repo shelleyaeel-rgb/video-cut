@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="session-token" content="__SESSION_TOKEN__">
+  <title>烽火剪辑 · 本地混剪工作台</title>
+  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+</head>
+<body>
+<header class="topbar"><a class="brand" href="/"><span class="brand-mark">▰</span> 烽火剪辑 <small>LOCAL STUDIO</small></a><span class="local"><i></i> 仅在本机处理 <span class="version">v0.1 原型</span></span></header>
+<main>
+  <section class="heading"><div class="eyebrow">从完整录像，到你的高光</div><h1>把精彩，剪到节拍上。</h1><p>选录像、配音乐，生成属于你的击杀混剪。</p><button type="button" class="secondary demo-button" id="demo">没有素材？体验合成演示 <span>↗</span></button></section>
+  <div class="diagnostics"><button type="button" class="secondary" id="open-logs">打开日志文件夹</button><a class="text-button" id="download-logs" download="videocut-logs.zip">下载日志</a><span id="log-status" class="hint" role="status">日志保存在本机，报错时可提供错误编号。</span></div>
+  <div id="error" class="notice error" role="alert" hidden></div>
+  <div id="demo-note" class="notice" hidden>当前为合成素材演示：用于验证剪辑流程，不代表三角洲真实识别效果。</div>
+  <div class="workspace">
+  <section class="settings panel">
+    <div class="panel-title"><span class="step">01</span><h2>准备素材</h2></div>
+    <label for="video">OBS 录像</label><div class="file-row"><input id="video" type="text" placeholder="粘贴完整路径，或点击选择" autocomplete="off"><button id="pick-video" class="secondary" type="button">选择</button></div>
+    <div id="video-info" class="hint">原片保留不变，支持 MP4、MKV 等常见格式。</div>
+    <label for="music">背景音乐</label><div class="file-row"><input id="music" type="text" placeholder="选择一首你喜欢的 BGM" autocomplete="off"><button id="pick-music" class="secondary" type="button">选择</button></div>
+    <div id="music-info" class="hint">音乐和录像都保留在本机。</div>
+    <div class="divider"></div>
+    <div class="panel-title"><span class="step">02</span><h2>设定混剪</h2></div>
+    <label for="profile">击杀提示配置</label><select id="profile"><option value="">首次使用，请在下方标定提示图案</option></select>
+    <p class="hint">同一套画面布局可复用。更换 HUD 后需要重新标定。</p>
+    <div class="two-cols"><div><label for="target">目标时长 / 秒</label><input type="number" id="target" min="5" max="120" value="90"></div><div><label for="music-start">音乐起点 / 秒</label><input type="number" id="music-start" min="0" step="0.1" value="0"></div></div>
+    <p class="hint">最长 120 秒；素材不足时生成更短的集锦。</p>
+    <label for="strength">特效强度 <output id="strength-value">适中</output></label><input id="strength" type="range" min="0" max="1" step="0.1" value="0.5"><div class="range-labels"><span>原片</span><span>放大 · 闪光 · 效果音</span></div>
+    <details class="advanced"><summary>声音与高级设置</summary>
+      <div class="audio-settings">
+        <label for="voice-mode">录像人声</label>
+        <select id="voice-mode"><option value="keep">保留人声 · 默认</option><option value="game_track">使用独立游戏音轨 · OBS 已分轨</option><option value="reduce">AI 减弱人声 · 试验功能</option></select>
+        <p id="voice-hint" class="hint">保留所选音轨中的游戏声和说话声，适合保留搞笑语音。</p>
+        <div id="source-track-group"><label for="audio-track">原片音轨</label><select id="audio-track"><option value="0">第一条音轨</option></select></div>
+        <div id="game-track-group" hidden><label for="game-audio-track">独立游戏音轨</label><select id="game-audio-track"><option value="">读取录像后，手动选择纯游戏声轨</option></select><p class="hint">需要 OBS 事先分轨录音；工具无法自动判断哪条是纯游戏声。若聊天混在所选轨里，仍会保留。</p></div>
+        <label for="music-voice-mode">BGM 人声</label><select id="music-voice-mode"><option value="keep">保留歌曲原声 · 默认</option><option value="instrumental">AI 提取伴奏 · 减弱演唱</option></select>
+        <p class="hint">录像和 BGM 分开处理。只处理入选片段与成片用到的音乐段落。</p>
+        <p id="audio-ai-status" class="hint" role="status">正在检查本机 AI 人声组件…</p>
+        <p id="audio-setup" class="hint" hidden>安装命令：<code>.\.venv\Scripts\python.exe scripts\setup_audio.py</code></p>
+        <div class="two-cols"><div><label for="game-volume">原声音量</label><input id="game-volume" type="number" min="0" max="2" step="0.1" value="0.6"></div><div><label for="music-volume">BGM 音量</label><input id="music-volume" type="number" min="0" max="2" step="0.1" value="0.65"></div></div>
+      </div>
+      <label for="encoder">导出方式</label><select id="encoder"><option value="cpu">CPU · 兼容模式</option><option value="nvenc">NVIDIA · 硬件加速</option></select>
+      <label for="threshold">检测阈值</label><input id="threshold" type="number" min="0.5" max="0.99" step="0.01" value="0.82"><p class="hint">过高容易漏检，过低容易误检；建议先使用默认值。</p>
+    </details>
+    <button class="primary generate" id="generate" type="button">生成混剪 <span>→</span></button>
+    <p class="footnote">输出 H.264 MP4 · 最高 1080p / 30 fps</p>
+  </section>
+  <section class="right-column">
+    <section class="panel preview-panel"><div class="preview-title"><h2>成片预览</h2><span id="result-badge" class="tag">等待生成</span></div><div id="empty-preview" class="empty-preview"><span class="play-symbol">▶</span><h3>下一条高光，从这里开始</h3><p>完成左侧设置，或先体验合成演示。</p><div class="preview-bars"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div></div><video id="result-video" controls playsinline hidden></video><div id="progress-area" hidden><div class="progress-title"><strong id="stage">准备中</strong><span id="percent">0%</span></div><progress id="progress" max="100" value="0"></progress><div class="progress-bottom"><span id="detail" class="hint"></span><button type="button" class="text-button" id="cancel">取消任务</button></div></div><div id="result" hidden><div class="result-stats"><div><strong id="stat-duration">—</strong><span>成片秒数</span></div><div><strong id="stat-clips">—</strong><span>入选镜头</span></div><div><strong id="stat-events">—</strong><span>候选事件</span></div></div><ul id="warnings" class="warnings"></ul><div class="result-actions"><a class="primary" id="download" download="montage.mp4">保存成片 ↓</a><button class="secondary" id="open-output" type="button">打开输出文件夹</button></div><div id="output-path" class="hint path"></div><details class="event-details"><summary>查看镜头来源</summary><ol id="clips"></ol></details></div></section>
+    <section class="panel calibration-panel"><details id="calibration"><summary><span><span class="step">03</span> 首次标定提示图案</span><span class="muted">有真实录像后设置</span></summary><div class="calibration-body"><p class="hint">在录像里找到一次清晰的击倒提示，输入对应秒数并读取画面。拖动框选稳定的图标或文字，避开玩家名、变化数字和场景背景。配置保存后，整段录像由工具自动扫描。</p><div class="two-cols"><div><label for="frame-time">原片时间 / 秒</label><input id="frame-time" type="number" min="0" step="0.1" value="0"></div><div class="align-bottom"><button class="secondary" id="frame" type="button">读取画面</button></div></div><div id="canvas-wrap" hidden><canvas id="canvas" width="960" height="540" aria-label="拖动框选提示图案"></canvas></div><p id="selection-info" class="hint">读取画面后可框选。</p><label for="profile-name">配置名称</label><input id="profile-name" value="我的三角洲提示" maxlength="80"><button class="secondary" id="save-profile" type="button" disabled>保存提示配置</button></div></details></section>
+    <p class="prototype-note">当前版本按提示图案寻找候选事件。真实游戏准确率、小时级处理和 RTX 5080 加速待验证。</p>
+  </section>
+  </div>
+  <footer><span>烽火剪辑 / PERSONAL EDITING WORKSPACE</span><span>你的素材，留在你的电脑。</span></footer>
+</main>
+</body></html>

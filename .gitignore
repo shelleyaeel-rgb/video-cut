@@ -1,0 +1,17 @@
+.venv/
+.tools/
+work/
+outputs/
+data/
+__pycache__/
+*.py[cod]
+*.mp4
+*.mkv
+*.mov
+*.wav
+*.mp3
+*.flac
+*.log
+.env
+.env.*
+!.env.example

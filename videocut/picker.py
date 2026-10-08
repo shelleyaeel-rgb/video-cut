@@ -2,6 +2,8 @@
 import json
 import sys
 import os
+import argparse
+from pathlib import Path
 
 
 def windows_picker(audio):
@@ -27,10 +29,20 @@ def windows_picker(audio):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('kind', choices=('music', 'video'), nargs='?', default='video')
+    parser.add_argument('--result', type=Path)
+    args = parser.parse_args()
+    def emit(value):
+        payload = json.dumps(value, ensure_ascii=True)
+        if args.result:
+            args.result.write_text(payload, encoding='utf-8')
+        else:
+            print(payload)
     try:
-        audio = len(sys.argv) > 1 and sys.argv[1] == 'music'
+        audio = args.kind == 'music'
         if os.name == 'nt':
-            print(json.dumps({'path': windows_picker(audio)}, ensure_ascii=True))
+            emit({'path': windows_picker(audio)})
             return
         import tkinter as tk
         from tkinter import filedialog
@@ -39,9 +51,9 @@ def main():
         root.attributes('-topmost', True)
         selected = filedialog.askopenfilename(title='选择 BGM' if audio else '选择 OBS 原始录像', filetypes=[('媒体文件', '*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.mp4 *.mkv' if audio else '*.mp4 *.mkv *.mov *.avi *.webm *.ts'), ('所有文件', '*.*')])
         root.destroy()
-        print(json.dumps({'path': selected}, ensure_ascii=True))
+        emit({'path': selected})
     except Exception:
-        print(json.dumps({'error': '文件选择窗口不可用，请复制完整路径到输入框。'}, ensure_ascii=True))
+        emit({'error': '文件选择窗口不可用，请复制完整路径到输入框。'})
 
 
 if __name__ == '__main__':

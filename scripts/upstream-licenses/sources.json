@@ -1,0 +1,24 @@
+[
+  {
+    "package": "pythonnet",
+    "url": "https://raw.githubusercontent.com/pythonnet/pythonnet/v3.0.5/LICENSE",
+    "sha256": "e1dc3a6ff017a6800dc27a7220500f512b95fbcd996d38ebbbff85c693245369"
+  },
+  {
+    "package": "clr-loader",
+    "url": "https://raw.githubusercontent.com/pythonnet/clr-loader/v0.2.7/LICENSE",
+    "sha256": "b00f9a4b112b44f91276ad8388ed470ad36668ff80f56f15e1e6981c85e6d23d"
+  },
+  {
+    "package": "proxy-tools",
+    "url": "https://raw.githubusercontent.com/jtushman/proxy_tools/master/LICENSE.txt",
+    "sha256": "a428fb8a2e762af3eb0a6edbbb88e9b42ccfee80fd9b423958bcacf9b9abbfe4"
+  },
+  {
+    "package": "Microsoft.Web.WebView2",
+    "version": "1.0.2957.106",
+    "url": "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.2957.106/microsoft.web.webview2.1.0.2957.106.nupkg",
+    "member": "LICENSE.txt",
+    "sha256": "9995174528dba139ca753d02d8667dbec49f65ab17e65c643a914f2b58cfb4a2"
+  }
+]

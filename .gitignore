@@ -1,5 +1,7 @@
 .venv/
 .tools/
+build/
+dist/
 work/
 outputs/
 data/

@@ -1,0 +1,2 @@
+# Keep upstream license bytes identical to the recorded download hashes.
+scripts/upstream-licenses/*-LICENSE.txt -text

@@ -3,6 +3,11 @@ const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="session-token"]').content;
 let activeJob = null, timer = null, frameImage = null, rect = null, drag = null, frameSource = null;
 let audioReady = false;
+let desktopMode = false, appClosing = false, updateTimer = null;
+let updateState = {state:'idle', supported:false, message:'点击检查更新后才会联网。'};
+const preferenceIds = ['target','strength','game-volume','music-volume','threshold','encoder','voice-mode','music-voice-mode'];
+const changedPreferences = new Set();
+let preferenceWrites = Promise.resolve();
 let activeJobKind = null, testResult = null, testFrameVersion = 0, testFrameBusy = false;
 let profiles = [], templateControls = [], excludedEvents = new Set();
 let maskImage = null, maskErase = [], maskDrag = null, calibrationBusy = false, maskVersion = 0;
@@ -33,7 +38,7 @@ function savePending() {
   logStatus();
 }
 async function flushErrors() {
-  if (sendingErrors || sessionExpired || !pendingErrors.length) return;
+  if (appClosing || sendingErrors || sessionExpired || !pendingErrors.length) return;
   sendingErrors = true;
   try {
     while (pendingErrors.length) {
@@ -49,6 +54,7 @@ async function flushErrors() {
   finally {sendingErrors=false;logStatus();}
 }
 function reportError(error, source='ui') {
+  if (appClosing) return;
   if (error?.requestId || error?.taskId) return;
   if (error && typeof error === 'object') {
     if (reported.has(error)) return;
@@ -94,6 +100,11 @@ function audioStatus(state) {
 }
 async function refreshProfiles(selected) {
   const state = await api('/api/state');
+  desktopMode = !!state.desktop;
+  $('app-version').textContent = `v${state.version || '—'}`;
+  $('update-version').textContent = `当前 v${state.version || '—'}`;
+  $('data-directory').textContent = state.data_dir ? `模板、设置和成片位置：${state.data_dir}` : '';
+  renderUpdate();
   audioStatus(state.audio);
   const prior = selected || $('profile').value;
   $('profile').replaceChildren(new Option('选择检测配置，或在下方标定', ''));
@@ -175,7 +186,7 @@ async function inspect(kind) {
 function testFrameControls(busy=!!activeJob) {
   ['test-read-frame','test-prev-frame','test-next-frame','test-frame-time'].forEach(id => $(id).disabled = busy || testFrameBusy || !testResult);
 }
-function setBusy(value) { ['generate','demo','frame','pick-video','pick-music','video','music','profile','threshold','voice-mode','audio-track','game-audio-track','test-profile','test-near-frame','test-start','test-duration'].forEach(id => $(id).disabled = value || calibrationBusy); musicSettings(value); $('cancel').hidden = !value; $('test-cancel').hidden = !value; calibrationControls(); templateControls.forEach(node=>node.disabled=value || calibrationBusy || $('profile').value==='demo'); testFrameControls(value); }
+function setBusy(value) { ['generate','demo','frame','pick-video','pick-music','video','music','profile','threshold','voice-mode','audio-track','game-audio-track','test-profile','test-near-frame','test-start','test-duration'].forEach(id => $(id).disabled = value || calibrationBusy); musicSettings(value); $('cancel').hidden = !value; $('test-cancel').hidden = !value; calibrationControls(); templateControls.forEach(node=>node.disabled=value || calibrationBusy || $('profile').value==='demo'); testFrameControls(value); renderUpdate(); }
 function invalidateTest() {
   testResult = null; testFrameVersion++; testFrameBusy = false;
   excludedEvents.clear();reviewStatus();
@@ -381,7 +392,76 @@ $('preview-mask').addEventListener('click',safe(async()=>{
   } finally {calibrationBusy=false;setBusy(!!activeJob);}
 }));
 $('reset-mask').addEventListener('click',()=>{invalidateMask();$('selection-info').textContent='擦除已重置，请重新预览识别区域。';});
+function renderUpdate() {
+  const state = updateState.state, pending = ['checking','downloading','installing'].includes(state);
+  $('check-update').disabled = appClosing || pending;
+  $('download-update').hidden = !updateState.supported || state !== 'available';
+  $('download-update').disabled = appClosing || pending;
+  $('install-update').hidden = state !== 'ready';
+  $('install-update').disabled = appClosing || !!activeJob || calibrationBusy || !desktopMode;
+  $('quit-app').hidden = !desktopMode;
+  $('quit-app').disabled = appClosing || !!activeJob || calibrationBusy || state === 'installing';
+  $('update-progress').hidden = state !== 'downloading';
+  $('update-progress').value = Number(updateState.progress) || 0;
+  const message = updateState.error || updateState.message || '点击检查更新后才会联网。';
+  $('update-status').textContent = message + (state === 'ready' && activeJob ? ' 请等待任务完成，或取消任务后再安装。' : '');
+  $('update-mode').textContent = updateState.supported ? '更新后重启生效，模板、设置和成片保留。' : '当前为源码运行模式；安装更新请使用 Windows 免安装版。';
+}
+async function readUpdate() {
+  if (appClosing) return;
+  updateState = await api('/api/update');
+  renderUpdate();
+  clearTimeout(updateTimer);
+  if (['checking','downloading'].includes(updateState.state)) updateTimer = setTimeout(() => {void readUpdate().catch(updateFailed);}, 800);
+}
+function updateFailed(error) {
+  if (appClosing) return;
+  clearTimeout(updateTimer);
+  updateState = {...updateState, state:'error', error:error.message, message:'更新失败，请重新检查。'};
+  renderUpdate();
+}
+async function updateAction(action) {
+  try {
+    updateState = await api(`/api/update/${action}`, {});
+    renderUpdate();
+    if (updateState.state === 'installing') {
+      appClosing = true; clearTimeout(updateTimer); clearTimeout(timer);
+      updateState.message = '正在重启安装更新，请等待应用重新打开。';
+      renderUpdate();
+      return;
+    }
+    await readUpdate();
+  } catch (error) {updateFailed(error);}
+}
+$('check-update').addEventListener('click', () => updateAction('check'));
+$('download-update').addEventListener('click', () => updateAction('download'));
+$('install-update').addEventListener('click', () => updateAction('install'));
+$('quit-app').addEventListener('click', safe(async () => {
+  await api('/api/quit', {});
+  appClosing = true; clearTimeout(updateTimer); clearTimeout(timer);
+  updateState = {...updateState, message:'应用已退出。浏览器模式下可以关闭此标签页。', error:null};
+  renderUpdate();
+}));
+function strengthLabel() {$('strength-value').textContent = Number($('strength').value)===0?'关闭':Number($('strength').value)<.4?'轻量':Number($('strength').value)<.8?'适中':'强烈';}
+async function loadPreferences() {
+  const saved = await api('/api/preferences');
+  for (const id of preferenceIds) if (saved[id] !== undefined && !changedPreferences.has(id)) $(id).value = String(saved[id]);
+  voiceSettings(); musicSettings(); strengthLabel();
+}
+preferenceIds.forEach(id => $(id).addEventListener('change', async () => {
+  changedPreferences.add(id);
+  if (id === 'voice-mode') voiceSettings();
+  if (id === 'strength') strengthLabel();
+  const value = $(id).value;
+  try {
+    preferenceWrites = preferenceWrites.catch(() => {}).then(() => api('/api/preferences', {[id]: value}));
+    await preferenceWrites;
+    $('preferences-status').textContent = '常用剪辑参数已保存到本机。';
+  } catch (error) {
+    $('preferences-status').textContent = `参数未能保存：${error.message}。当前仍可继续操作。`;
+  }
+}));
 logStatus();
 voiceSettings();
 musicSettings();
-safe(async () => {const state=await refreshProfiles();if(state.active)startPolling(state.active);})();
+safe(async () => {const state=await refreshProfiles();if(state.active)startPolling(state.active);await loadPreferences();await readUpdate();})();

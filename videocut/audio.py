@@ -10,6 +10,7 @@ import wave
 
 from .audio_model import ENGINE_VERSION, MODEL_SHA256, SAMPLE_RATE, require_model
 from .media import ROOT, LoggedProcess, ffmpeg_args, run
+from .paths import worker_command
 
 VOICE_MODES = ('keep','game_track','reduce')
 MUSIC_VOICE_MODES = ('keep','instrumental')
@@ -84,7 +85,7 @@ def reduce_voice(source, destination, ctx, label, low, high):
     progress = destination.with_suffix('.progress.json')
     ctx.update(label,low,'CPU 正在加载人声模型，可随时取消')
     started = time.monotonic()
-    command = [sys.executable,'-m','videocut.separator',source,destination,progress]
+    command = worker_command('separator', source, destination, progress)
     with LoggedProcess(command,ctx) as child:
         last = None
         while True:

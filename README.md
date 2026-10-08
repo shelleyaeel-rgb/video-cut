@@ -4,7 +4,15 @@
 
 **当前没有经过真实三角洲录像校准。** 内置合成演示用于测试流程，不等于已经具备准确的游戏高光识别能力。实施方案见 [docs/PLAN.md](docs/PLAN.md)，实测记录见 [docs/VALIDATION.md](docs/VALIDATION.md)。
 
-## 在这台电脑上启动
+## Windows 免安装版
+
+下载或复制 `FenghuoClip-0.2.0-windows-x64.zip`，完整解压后双击 `FenghuoClip/FenghuoClip.exe`。保留旁边的 `_internal` 文件夹；Python、FFmpeg 和 AI 人声模型已经打入包中，无需安装 Python。桌面窗口使用 Windows WebView2；若该运行时不可用，会打开系统浏览器继续使用。退出时点击“退出应用”，有任务运行时先等待或取消。
+
+页面中的“版本与更新”提供检查、下载和重启安装。更新只在主动点击时联网，剪辑与 AI 处理仍在本机离线运行。尚未发布正式版本、仓库不可访问或断网时会显示原因，现有版本继续可用。私有仓库认证、构建发布和数据目录详见 [桌面版说明](docs/DESKTOP.md)。
+
+免安装版的模板、偏好设置、日志、缓存及输出保存在 `%LOCALAPPDATA%\FenghuoClip`，与程序目录分开。常用时长、音量、特效、阈值和编码选项会保存；素材路径和本次测试排除记录不跨会话恢复。
+
+## 从源码在这台电脑上启动
 
 双击项目根目录的 `start.cmd`，浏览器会打开本机工作台。保持启动窗口运行；关闭工具时可在窗口按 Ctrl+C。
 
@@ -55,7 +63,7 @@
 
 仅以稳定提示出现为依据。不会自动断言“一打三”“灭队”或理解精彩程度。同一提示长时间不消失会合并为一个事件；若连续击倒只改变提示数字，需要在真实素材阶段增加识别方法。
 
-## 在另一台 Windows 电脑上安装
+## 在另一台 Windows 电脑上运行源码
 
 准备 **Python 3.12 x64** 和网络，复制源码（无需复制 `.venv`、`work`、`outputs`），然后：
 
@@ -66,16 +74,19 @@
 
 在当前 Codex 环境中，脚本也能定位已提供的 Python。安装会创建项目内 `.venv` 和 `.tools`，不更改系统 PATH。NumPy/OpenCV 版本固定；下载按 PyPI 的 SHA-256 校验。FFmpeg 从 Gyan 官方构建站下载，校验发布者提供的 SHA-256，实际下载信息在 `.tools/ffmpeg-download.json`。若 PyPI 文件下载慢，可加 `-PackageMirror 'https://mirrors.aliyun.com/pypi'`，仍使用 PyPI 官方哈希核验；本次 OpenCV 安装使用了这个镜像。
 
-此处虚拟环境依赖安装时的 Python，不可直接当作独立安装包搬走。若以后要做单文件 EXE，需要额外打包与干净机器验证。CPU 模式默认可用；NVIDIA 模式需要合适驱动和硬件，失败会提示并回退 CPU。
+此处虚拟环境依赖安装时的 Python，不可直接搬走；另一台电脑日常使用建议选择上面的免安装版。CPU 模式默认可用；NVIDIA 模式需要合适驱动和硬件，失败会提示并回退 CPU。
 
 需要 AI 人声处理时，额外运行 `.\.venv\Scripts\python.exe scripts\setup_audio.py` 下载约 64 MiB 的模型。本次电脑已完成安装；AI 音频使用 CPU，NVIDIA 选项只用于视频编码。
 
 ## 文件和空间
 
+以下为数据根目录内的相对路径：源码版默认项目目录，免安装版默认 `%LOCALAPPDATA%\FenghuoClip`。
+
 - `outputs/<任务ID>/montage.mp4`：成片。
 - `outputs/<任务ID>/events.json`：全部候选的时间、图案匹配分数、命中模板、分类、判定依据，以及是否保留和过滤原因。
 - `outputs/<任务ID>/manifest.json`：选片时间线、参数、提示与实测用时。
 - `data/profiles/`：用户标定的检测模板。
+- `data/preferences.json`：常用剪辑参数。
 - `work/jobs/`：候选片段和效果音缓存；只存选中的片段，不保存全片逐帧图片。
 - `work/demo/`：合成演示素材。
 - `work/audio-cache/`：成功的人声分离结果，可跨任务复用；不自动清理。

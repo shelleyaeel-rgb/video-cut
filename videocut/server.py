@@ -29,6 +29,9 @@ from .detect import list_profiles, save_profile, prepare_template, mask_preview,
 from .media import ROOT, Cancelled, Context, local_file, preview_frame, probe, run, tool_path
 from .pipeline import generate, validate
 from .profile_test import test_profile, validate_profile_test
+from .paths import RESOURCE_ROOT, worker_command
+from .updater import UpdateManager
+from .preferences import Preferences
 
 
 class App:
@@ -41,6 +44,31 @@ class App:
         self.media = {}
         self.closing = False
         self.client_reports = []
+        self.updater = UpdateManager()
+        self.preferences = Preferences()
+        self.desktop = False
+        self.request_exit = None
+
+    def begin_exit(self, update=False):
+        with self.lock:
+            if not self.desktop or not self.request_exit:
+                raise ValueError('请从桌面版使用此操作。')
+            if self.closing:
+                raise ValueError('应用正在退出。')
+            if self.active:
+                raise ValueError('任务正在运行，请等待完成或取消后再退出或更新。')
+            self.closing = True
+            try:
+                result = self.updater.install() if update else {'ok': True}
+            except Exception:
+                self.closing = False
+                raise
+            # Give the HTTP response time to reach the UI before destroying its
+            # window. The same lock prevents a job starting during this gap.
+            timer = threading.Timer(.5, self.request_exit)
+            timer.daemon = True
+            timer.start()
+            return result
 
     def register(self, path):
         with self.lock:
@@ -222,18 +250,22 @@ def handler_for(app):
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
             if parsed.path == '/':
-                html = (ROOT / 'web' / 'index.html').read_text(encoding='utf-8').replace('__SESSION_TOKEN__', app.token)
+                html = (RESOURCE_ROOT / 'web' / 'index.html').read_text(encoding='utf-8').replace('__SESSION_TOKEN__', app.token)
                 self.send_bytes(html.encode('utf-8'), 'text/html; charset=utf-8')
                 return
             if parsed.path in ('/app.js', '/style.css'):
-                file = ROOT / 'web' / parsed.path[1:]
+                file = RESOURCE_ROOT / 'web' / parsed.path[1:]
                 self.send_bytes(file.read_bytes(), 'text/javascript; charset=utf-8' if file.suffix == '.js' else 'text/css; charset=utf-8')
                 return
             if not self.authenticated(query):
                 self.json({'error': '本地会话已失效，请刷新页面。'}, 403)
                 return
             if parsed.path == '/api/state':
-                self.json({'version': __version__, 'profiles': list_profiles(), 'active': app.active, 'output_dir': str(ROOT / 'outputs'), 'logs': logs.store().status(), 'audio': audio_status()})
+                self.json({'version': __version__, 'profiles': list_profiles(), 'active': app.active, 'output_dir': str(ROOT / 'outputs'), 'data_dir': str(ROOT), 'desktop': app.desktop, 'logs': logs.store().status(), 'audio': audio_status()})
+            elif parsed.path == '/api/update':
+                self.json(app.updater.status())
+            elif parsed.path == '/api/preferences':
+                self.json(app.preferences.get())
             elif parsed.path == '/api/job':
                 self.json(app.snapshot(query.get('id', [''])[0]))
             elif parsed.path == '/api/template-image':
@@ -306,7 +338,19 @@ def handler_for(app):
                 raise ValueError('请求格式无效。')
             self.inputs = diagnostic_inputs(data)
             route = urlparse(self.path).path
-            if route == '/api/probe':
+            if app.closing:
+                raise ValueError('应用正在退出，请稍后重新打开。')
+            if route == '/api/update/check':
+                self.json(app.updater.check(), 202)
+            elif route == '/api/update/download':
+                self.json(app.updater.download(), 202)
+            elif route == '/api/update/install':
+                self.json(app.begin_exit(update=True), 202)
+            elif route == '/api/quit':
+                self.json(app.begin_exit(), 202)
+            elif route == '/api/preferences':
+                self.json(app.preferences.save(data))
+            elif route == '/api/probe':
                 path = local_file(data.get('path', ''), data.get('audio', False))
                 result = probe(path)
                 result['media_id'] = app.register(path)
@@ -347,8 +391,14 @@ def handler_for(app):
                 app.cancel(data.get('id'))
                 self.json({'ok': True})
             elif route == '/api/pick':
-                output = run([os.sys.executable, '-m', 'videocut.picker', 'music' if data.get('kind') == 'music' else 'video'], timeout=180)
-                self.json(json.loads(output))
+                folder = ROOT / 'work' / 'pickers'
+                folder.mkdir(parents=True, exist_ok=True)
+                result_path = folder / f'{uuid.uuid4().hex}.json'
+                try:
+                    run(worker_command('picker', 'music' if data.get('kind') == 'music' else 'video', '--result', result_path), timeout=180)
+                    self.json(json.loads(result_path.read_text(encoding='utf-8')))
+                finally:
+                    result_path.unlink(missing_ok=True)
             elif route == '/api/open-logs':
                 path = logs.store().directory
                 path.mkdir(parents=True, exist_ok=True)

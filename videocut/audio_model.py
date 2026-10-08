@@ -2,8 +2,9 @@
 import hashlib
 import importlib.util
 from pathlib import Path
+from .paths import RESOURCE_ROOT, FROZEN
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = RESOURCE_ROOT
 MODEL_NAME = 'Kim_Vocal_2.onnx'
 MODEL_URL = 'https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/' + MODEL_NAME
 MODEL_SHA256 = 'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b'
@@ -18,11 +19,13 @@ ENGINE_VERSION = 'mdx-opencv-cpu-1'
 def status():
     runtime = importlib.util.find_spec('cv2') is not None
     model = MODEL_PATH.is_file() and MODEL_PATH.stat().st_size == MODEL_BYTES
-    return {'ready': runtime and model, 'runtime_installed': runtime, 'model_installed': model, 'model': MODEL_NAME, 'device': 'CPU', 'setup_command': r'.\.venv\Scripts\python.exe scripts\setup_audio.py'}
+    return {'ready': runtime and model, 'runtime_installed': runtime, 'model_installed': model, 'model': MODEL_NAME, 'device': 'CPU', 'setup_command': '请重新解压完整的免安装包。' if FROZEN else r'.\.venv\Scripts\python.exe scripts\setup_audio.py'}
 
 
 def require_model(verify=False):
     if not status()['ready']:
+        if FROZEN:
+            raise ValueError('AI 人声组件不完整，请重新解压完整的免安装包。')
         raise ValueError('AI 人声处理组件尚未安装。请先运行 .venv\\Scripts\\python.exe scripts\\setup_audio.py，或选择保留原声／独立音轨。')
     if verify:
         with MODEL_PATH.open('rb') as source:

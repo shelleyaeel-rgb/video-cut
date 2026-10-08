@@ -56,6 +56,26 @@ class HttpTests(unittest.TestCase):
         with self.request('/api/generate',{'X-Session-Token':self.app.token},{'video':'Z:/missing.mp4'}) as r:self.assertEqual(r.status,400)
         self.assertIsNone(self.app.active)
 
+    def test_update_routes_require_authentication_and_source_cannot_install(self):
+        headers = {'X-Session-Token': self.app.token}
+        for route in ('/api/update', '/api/preferences'):
+            with self.request(route) as r:
+                self.assertEqual(r.status, 403)
+        for route in ('/api/update/check', '/api/update/download', '/api/update/install', '/api/quit', '/api/preferences'):
+            with self.request(route, body={}) as r:
+                self.assertEqual(r.status, 403)
+        with patch.object(self.app.updater, 'check', return_value={'state': 'checking'}) as check:
+            with self.request('/api/update', headers) as r:
+                self.assertEqual(r.status, 200)
+            check.assert_not_called()
+            with self.request('/api/update/check', headers, {}) as r:
+                self.assertEqual(r.status, 202)
+                self.assertEqual(json.load(r)['state'], 'checking')
+            check.assert_called_once()
+        with self.request('/api/update/install', headers, {}) as r:
+            self.assertEqual(r.status, 400)
+        self.assertFalse(self.app.closing)
+
     def test_profile_test_auth_and_validation(self):
         with self.request('/api/test-profile', body={'video':'missing.mp4'}) as r:
             self.assertEqual(r.status, 403)

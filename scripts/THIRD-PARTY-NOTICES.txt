@@ -1,0 +1,51 @@
+FenghuoClip third-party components
+================================
+This directory records upstream notices for the bundled runtime. It does not
+grant a new license to third-party code or model weights.
+
+CPython: Python Software Foundation License. See Python-LICENSE.txt.
+NumPy: BSD-style license and included numerical-library notices; see numpy/.
+OpenCV: Apache 2.0 plus binary-wheel notices; see opencv-python-headless/.
+pywebview: BSD-style license; see pywebview/. Its Windows bridge also ships
+Microsoft WebView2 SDK 1.0.2957.106 assemblies. See upstream-licenses/WebView2-LICENSE.txt.
+pythonnet: MIT; clr-loader: MIT; cffi: MIT; pycparser: BSD; proxy-tools: BSD;
+bottle: MIT; typing-extensions: Python Software Foundation terms.
+The complete installed package identities and shipped notice paths are recorded
+in runtime-packages.json. Consult each package's license/metadata for exact terms.
+Notices omitted by upstream wheels are preserved in upstream-licenses/ with
+their original source URLs. Tcl/Tk notices are in ../_tk_data/license.terms.
+WebView2 Evergreen Runtime and .NET Framework are supplied by Windows/Microsoft,
+not installed or redistributed by this archive.
+
+FFmpeg
+------
+The separate ffmpeg.exe and ffprobe.exe programs are the Gyan 9.0.2 essentials
+build, distributed under GPL version 3. The unmodified upstream LICENSE and
+README.txt are preserved at ../.tools/ffmpeg/ffmpeg-9.0.2-essentials_build/.
+That README includes the build configuration and the corresponding source:
+https://github.com/FFmpeg/FFmpeg/commit/946fcce07b
+Official build provider, source/build information and dependency documentation:
+https://www.gyan.dev/ffmpeg/builds/
+https://ffmpeg.org/legal.html
+windows-dependencies.json records the exact upstream archive and component hashes.
+FFmpeg runs as an independent subprocess. Anyone redistributing this bundle must
+meet the applicable GPL corresponding-source and notice obligations, including
+those of linked libraries; the source links here do not replace those obligations.
+
+Voice model
+-----------
+Name: Kim_Vocal_2.onnx
+Upstream: https://github.com/TRvlvr/model_repo
+Asset: https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Vocal_2.onnx
+SHA-256: ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b
+The model's own upstream usage and redistribution terms apply independently of
+the Python runtime. The upstream release asset does not include a license file.
+Public redistribution of these weights requires verification of those terms.
+Builds and local testing do not establish redistribution permission.
+
+PyInstaller bootloader
+---------------------
+PyInstaller: GPL 2.0 with a bootloader exception permitting built applications
+to be distributed under the application's own license. See
+https://pyinstaller.org/en/stable/license.html
+No source-code license for FenghuoClip is assigned by this notice.

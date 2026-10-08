@@ -1,0 +1,17 @@
+# Build with 64-bit CPython 3.12 on Windows.
+-r requirements.txt
+pyinstaller==6.16.0
+pyinstaller-hooks-contrib==2025.9
+pywebview==6.0
+pythonnet==3.0.5
+clr-loader==0.2.7.post0
+cffi==2.0.0
+pycparser==2.23
+proxy-tools==0.1.0
+bottle==0.13.4
+typing-extensions==4.15.0
+altgraph==0.17.5
+packaging==26.3
+pefile==2023.2.7
+pywin32-ctypes==0.2.3
+setuptools==84.0.0

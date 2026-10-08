@@ -10,8 +10,9 @@ import time
 import uuid
 from pathlib import Path
 from . import logs
+from .paths import DATA_ROOT, RESOURCE_ROOT
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = DATA_ROOT
 VIDEO_SUFFIXES = {'.mp4', '.mkv', '.mov', '.avi', '.webm', '.m4v', '.ts'}
 AUDIO_SUFFIXES = VIDEO_SUFFIXES | {'.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg'}
 
@@ -70,7 +71,7 @@ def tool_path(name):
     if override and Path(override).is_file():
         return Path(override)
     suffix = '.exe' if os.name == 'nt' else ''
-    found = sorted((ROOT / '.tools' / 'ffmpeg').glob(f'**/bin/{name}{suffix}'))
+    found = sorted((RESOURCE_ROOT / '.tools' / 'ffmpeg').glob(f'**/bin/{name}{suffix}'))
     if found:
         return found[-1]
     system = shutil.which(name)

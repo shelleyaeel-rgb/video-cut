@@ -7,7 +7,7 @@ const {randomUUID} = require('node:crypto');
 const code = fs.readFileSync(require('node:path').join(__dirname,'../web/app.js'),'utf8');
 const settle = async () => {await new Promise(setImmediate);await new Promise(setImmediate);};
 
-function page({storage=new Map(),online=true,serverFailure=false,audioReady=true,token='private-session-token',onRequest}={}) {
+function page({storage=new Map(),online=true,serverFailure=false,audioReady=true,token='private-session-token',onRequest,desktop=false,preferences={},update={state:'idle',supported:false}}={}) {
   const nodes=new Map(), events={}, reports=[], requests=[];
   function node(id) {
     if (!nodes.has(id)) nodes.set(id,{value:['voice-mode','music-voice-mode'].includes(id)?'keep':'',textContent:'',hidden:true,handlers:{},children:[],addEventListener(name,fn){this.handlers[name]=fn;},getContext(){return {};},append(child){this.children.push(child);},after(){},replaceChildren(){this.children=[];},add(){},pause(){}});
@@ -22,7 +22,9 @@ function page({storage=new Map(),online=true,serverFailure=false,audioReady=true
     fetch:async(path,options)=>{
       if (!online) throw new Error('offline');
       requests.push({path,body:options?.body?JSON.parse(options.body):null});
-      if (path==='/api/state') return response({profiles:[],active:null,logs:{write_error:false},audio:{ready:audioReady}});
+      if (path==='/api/state') return response({profiles:[],active:null,version:'0.2.0',desktop,data_dir:'C:/local-data',logs:{write_error:false},audio:{ready:audioReady}});
+      if (path==='/api/update') return response(update);
+      if (path==='/api/preferences') {if(options.body)Object.assign(preferences,JSON.parse(options.body));return response(preferences);}
       if (path==='/api/client-error') {reports.push(JSON.parse(options.body));return response({ok:true,logs:{write_error:false}});}
       if (path==='/api/generate' && serverFailure) return response({error:'invalid test video',request_id:'request-test-id'},400);
       if (onRequest) return response(await onRequest(path, options?.body?JSON.parse(options.body):null));
@@ -32,6 +34,65 @@ function page({storage=new Map(),online=true,serverFailure=false,audioReady=true
   vm.runInContext(code,context,{filename:'web/app.js'});
   return {nodes,events,reports,storage,node,requests};
 }
+
+test('updates are opt-in and source mode cannot install or quit',async()=>{
+  const p=page();await settle();
+  assert.equal(p.node('app-version').textContent,'v0.2.0');
+  assert.ok(!p.requests.some(r=>r.path==='/api/update/check'));
+  assert.equal(p.node('download-update').hidden,true);
+  assert.equal(p.node('quit-app').hidden,true);
+  assert.match(p.node('update-mode').textContent,/源码/);
+});
+
+test('desktop update errors remain readable and can be retried',async()=>{
+  const update={state:'error',supported:true,error:'无法连接 GitHub'};
+  const p=page({desktop:true,update,onRequest:async path=>{
+    assert.equal(path,'/api/update/check');Object.assign(update,{state:'available',error:null,message:'发现新版本 0.3.0',version:'0.3.0'});return update;
+  }});await settle();
+  assert.match(p.node('update-status').textContent,/无法连接/);
+  assert.equal(p.node('check-update').disabled,false);
+  await p.node('check-update').handlers.click();await settle();
+  assert.equal(p.node('download-update').hidden,false);
+  assert.match(p.node('update-status').textContent,/0.3.0/);
+});
+
+test('active jobs disable prepared update installation and desktop exit',async()=>{
+  const p=page({desktop:true,update:{state:'ready',supported:true},onRequest:async path=>{
+    if(path==='/api/demo')return {id:'busy-job'};
+    if(path.startsWith('/api/job'))return new Promise(()=>{});
+    throw new Error(path);
+  }});await settle();
+  assert.equal(p.node('install-update').disabled,false);
+  await p.node('demo').handlers.click();await settle();
+  assert.equal(p.node('install-update').disabled,true);
+  assert.equal(p.node('quit-app').disabled,true);
+  assert.match(p.node('update-status').textContent,/等待任务/);
+});
+
+test('accepted installation stops update polling and suppresses shutdown errors',async()=>{
+  const p=page({desktop:true,update:{state:'ready',supported:true},onRequest:async path=>{
+    assert.equal(path,'/api/update/install');return {state:'installing',supported:true};
+  }});await settle();
+  const polls=p.requests.filter(r=>r.path==='/api/update').length;
+  await p.node('install-update').handlers.click();await settle();
+  p.events.error({error:new Error('connection closed for restart')});await settle();
+  assert.equal(p.requests.filter(r=>r.path==='/api/update').length,polls);
+  assert.equal(p.reports.length,0);
+  assert.equal(p.node('check-update').disabled,true);
+  assert.match(p.node('update-status').textContent,/重新打开/);
+});
+
+test('user defaults restore and save only edited preference fields',async()=>{
+  const preferences={target:60,'voice-mode':'game_track',strength:.2};
+  const p=page({preferences});await settle();
+  assert.equal(p.node('target').value,'60');
+  assert.equal(p.node('game-track-group').hidden,false);
+  assert.equal(p.node('strength-value').textContent,'轻量');
+  p.node('video').value='private.mp4';p.node('target').value='80';
+  await p.node('target').handlers.change();await settle();
+  assert.deepEqual(p.requests.find(r=>r.path==='/api/preferences'&&r.body).body,{target:'80'});
+  assert.equal(preferences.target,'80');
+});
 
 test('caught UI error is persisted with the displayed reference ID',async()=>{
   const p=page();await settle();

@@ -7,10 +7,17 @@
   <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
 </head>
 <body>
-<header class="topbar"><a class="brand" href="/"><span class="brand-mark">▰</span> 烽火剪辑 <small>LOCAL STUDIO</small></a><span class="local"><i></i> 仅在本机处理 <span class="version">v0.1 原型</span></span></header>
+<header class="topbar"><a class="brand" href="/"><span class="brand-mark">▰</span> 烽火剪辑 <small>LOCAL STUDIO</small></a><span class="local"><i></i> 仅在本机处理 <span class="version" id="app-version">正在读取版本</span></span></header>
 <main>
   <section class="heading"><div class="eyebrow">从完整录像，到你的高光</div><h1>把精彩，剪成你的高光。</h1><p>选录像生成混剪，也可以添加音乐，跟随节拍剪辑。</p><button type="button" class="secondary demo-button" id="demo">没有素材？体验合成演示 <span>↗</span></button></section>
-  <div class="diagnostics"><button type="button" class="secondary" id="open-logs">打开日志文件夹</button><a class="text-button" id="download-logs" download="videocut-logs.zip">下载日志</a><span id="log-status" class="hint" role="status">日志保存在本机，报错时可提供错误编号。</span></div>
+  <div class="diagnostics"><button type="button" class="secondary" id="open-logs">打开日志文件夹</button><a class="text-button" id="download-logs" download="videocut-logs.zip">下载日志</a><button type="button" class="secondary" id="quit-app" hidden>退出应用</button><span id="log-status" class="hint" role="status">日志保存在本机，报错时可提供错误编号。</span></div>
+  <details class="update-panel"><summary>版本与更新 <span id="update-version" class="hint"></span></summary><div class="update-body">
+    <p id="update-status" class="hint" role="status" aria-live="polite">点击检查更新后才会联网。</p>
+    <progress id="update-progress" max="100" value="0" hidden aria-label="更新下载进度"></progress>
+    <div class="update-actions"><button type="button" class="secondary" id="check-update">检查更新</button><button type="button" class="secondary" id="download-update" hidden>下载新版</button><button type="button" class="primary" id="install-update" hidden>重启安装</button></div>
+    <p id="update-mode" class="hint"></p><p id="data-directory" class="hint path"></p>
+  </div></details>
+  <p id="preferences-status" class="hint preferences-status" role="status">常用剪辑参数会保存在本机。</p>
   <div id="error" class="notice error" role="alert" hidden></div>
   <div id="demo-note" class="notice" hidden>当前为合成素材演示：用于验证剪辑流程，不代表三角洲真实识别效果。</div>
   <div class="workspace">

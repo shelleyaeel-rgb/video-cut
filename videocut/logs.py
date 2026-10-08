@@ -14,8 +14,9 @@ import traceback
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from .paths import DATA_ROOT
 
-DIRECTORY = Path(__file__).resolve().parents[1] / 'work' / 'logs'
+DIRECTORY = DATA_ROOT / 'work' / 'logs'
 MIB = 1024 * 1024
 POLICY = {'startup': (2*MIB, 2), 'runtime': (5*MIB, 3), 'tasks': (5*MIB, 3), 'ffmpeg': (10*MIB, 4), 'frontend': (2*MIB, 2)}
 _context = contextvars.ContextVar('diagnostic_context', default={})

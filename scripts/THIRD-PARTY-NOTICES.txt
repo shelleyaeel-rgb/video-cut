@@ -5,7 +5,11 @@ grant a new license to third-party code or model weights.
 
 CPython: Python Software Foundation License. See Python-LICENSE.txt.
 NumPy: BSD-style license and included numerical-library notices; see numpy/.
-OpenCV: Apache 2.0 plus binary-wheel notices; see opencv-python-headless/.
+OpenCV: Apache 2.0 plus binary-wheel notices; see opencv-python/.
+RapidOCR: Apache 2.0; includes local PP-OCR Chinese ONNX models derived from
+PaddleOCR. See rapidocr-onnxruntime/ and https://github.com/RapidAI/RapidOCR.
+ONNX Runtime: MIT; see onnxruntime/. OCR supporting packages and their notices
+are recorded individually in runtime-packages.json.
 pywebview: BSD-style license; see pywebview/. Its Windows bridge also ships
 Microsoft WebView2 SDK 1.0.2957.106 assemblies. See upstream-licenses/WebView2-LICENSE.txt.
 pythonnet: MIT; clr-loader: MIT; cffi: MIT; pycparser: BSD; proxy-tools: BSD;
@@ -49,3 +53,19 @@ PyInstaller: GPL 2.0 with a bootloader exception permitting built applications
 to be distributed under the application's own license. See
 https://pyinstaller.org/en/stable/license.html
 No source-code license for FenghuoClip is assigned by this notice.
+
+Recording runtime
+-----------------
+OBS Studio/libobs 32.2.2 (GPL-2.0-or-later), the matching capture/encoder/output
+plugins, and their unmodified runtime resources are under ../.tools/obs/.
+Pinned upstream release and corresponding source tag:
+https://github.com/obsproject/obs-studio/releases/tag/32.2.2
+https://github.com/obsproject/obs-studio/tree/32.2.2
+The capture host is provided as Python source in ../native/capture_host.py.
+Its private CPython 3.12.10 runtime includes ../.tools/obs/bin/64bit/LICENSE.txt.
+App-local Microsoft Visual C++ runtime DLLs retain the vendor license
+RTF alongside them; no redistributable installer is executed on the user's PC.
+Capture runtime versions, official download URLs and hashes are recorded in
+../.tools/obs/capture-runtime.json and scripts/download_capture.py in the source.
+These component licenses and corresponding-source obligations apply separately;
+running a component in a child process does not replace those obligations.

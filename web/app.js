@@ -3,6 +3,8 @@ const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="session-token"]').content;
 let activeJob = null, timer = null, frameImage = null, rect = null, drag = null, frameSource = null;
 let audioReady = false;
+let autoDetection = null;
+let recordingBusy = false, recordingMontage = null;
 let desktopMode = false, appClosing = false, updateTimer = null;
 let updateState = {state:'idle', supported:false, message:'点击检查更新后才会联网。'};
 const preferenceIds = ['target','strength','game-volume','music-volume','threshold','encoder','voice-mode','music-voice-mode'];
@@ -83,10 +85,28 @@ function safe(fn) { return async (...args) => {clearError(); try { await fn(...a
 function mediaUrl(id) { return `/media?id=${encodeURIComponent(id)}&token=${encodeURIComponent(token)}`; }
 function clock(value) { const n = Math.max(0, Number(value)); return `${Math.floor(n/60).toString().padStart(2,'0')}:${(n%60).toFixed(1).padStart(4,'0')}`; }
 function demoNote() { $('demo-note').hidden = $('profile').value !== 'demo'; }
+function autoMode() { return $('profile').value === 'delta-auto' || profiles.find(p=>p.id===$('profile').value)?.kind === 'delta_auto'; }
+function detectionSettings() {
+  const automatic=autoMode(), range=$('scan-scope').value==='range';
+  $('manual-settings').hidden=automatic;
+  $('manual-calibration').hidden=automatic || $('profile').value==='demo';
+  $('scan-range').hidden=!range;
+  $('test-near-frame').hidden=automatic;
+  $('test-profile').textContent=range?'扫描此片段':'扫描整段录像';
+  $('detection-badge').textContent=automatic?'自动识别':$('profile').value==='demo'?'合成演示':'手动模板';
+  $('detection-description').textContent=automatic?'全画面寻找击倒、击败提示，自动去重并整理候选事件。':'使用所选模板寻找提示；可在识别设置中管理配置、调整阈值。';
+  $('auto-status').hidden=!automatic || autoDetection?.available!==false;
+  $('auto-status').textContent=autoDetection?.available===false?`自动识别暂不可用：${autoDetection.reason || '本机识别组件未就绪，请安装识别依赖后重启应用。'}`:'';
+  $('score-description').textContent=automatic?'识别分数来自文字识别，不代表击杀准确率；请结合原片画面确认。':'匹配分数表示模板相似度，不代表击杀准确率；请结合原片画面确认。';
+}
+function requireDetection() {
+  if (!$('profile').value) throw new Error('请先选择识别模式，或保存手动模板配置。');
+  if (autoMode() && autoDetection?.available===false) throw new Error(`自动识别暂不可用：${autoDetection.reason || '本机识别组件未就绪，请安装识别依赖后重启应用。'}`);
+}
 function musicSettings(busy=!!activeJob) {
   const hasMusic=!!$('music').value.trim();
   ['music-start','music-volume','music-voice-mode','clear-music'].forEach(id => $(id).disabled=busy || !hasMusic);
-  if (!hasMusic) $('music-info').textContent='未添加 BGM，按镜头原有节奏剪辑，保留原声和已开启的效果音。';
+  if (!hasMusic) $('music-info').textContent='未添加 BGM，保留原声和已开启的效果音。';
 }
 function voiceSettings() {
   const mode=$('voice-mode').value;
@@ -106,16 +126,18 @@ async function refreshProfiles(selected) {
   $('data-directory').textContent = state.data_dir ? `模板、设置和成片位置：${state.data_dir}` : '';
   renderUpdate();
   audioStatus(state.audio);
+  autoDetection = state.auto_detection || null;
   const prior = selected || $('profile').value;
-  $('profile').replaceChildren(new Option('选择检测配置，或在下方标定', ''));
-  state.profiles.forEach(p => $('profile').add(new Option(p.name, p.id)));
-  if (prior) $('profile').value = prior;
   profiles = state.profiles;
+  $('profile').replaceChildren();
+  profiles.forEach(p => $('profile').add(new Option(p.name, p.id)));
+  $('profile').add(new Option('新建手动模板配置…', ''));
+  $('profile').value = profiles.some(p=>p.id===prior) ? prior : (profiles.find(p=>p.kind==='delta_auto')?.id || profiles[0]?.id || '');
   const destination = selected || $('profile-destination').value;
   $('profile-destination').replaceChildren(new Option('新建游戏配置', ''));
-  profiles.filter(p=>p.kind!=='demo').forEach(p=>$('profile-destination').add(new Option(p.name,p.id)));
-  $('profile-destination').value = destination==='demo' ? '' : destination;
-  renderTemplates(); calibrationControls();
+  profiles.filter(p=>!['demo','delta_auto'].includes(p.kind)).forEach(p=>$('profile-destination').add(new Option(p.name,p.id)));
+  $('profile-destination').value = ['demo','delta-auto'].includes(destination) ? '' : destination;
+  renderTemplates(); calibrationControls(); detectionSettings();
   demoNote(); return state;
 }
 
@@ -168,7 +190,10 @@ function calibrationSpec() {
 }
 
 function reviewStatus() {
-  $('review-status').textContent=`已手动排除 ${excludedEvents.size} 个事件，将用于下一次生成；范围仅限本次测试。`;
+  const automaticFiltered=testResult?.events.filter(e=>e.classification==='npc').length || 0;
+  const retained=Math.max(0,(testResult?.events.length || 0)-automaticFiltered-excludedEvents.size);
+  $('review-status').textContent=`候选 ${testResult?.events.length || 0} 个 · 自动过滤 ${automaticFiltered} 个 · 已手动排除 ${excludedEvents.size} 个 · 保留 ${retained} 个。`;
+  $('generation-hint').textContent=testResult?`${testResult.full_scan?'整段':'片段'}扫描找到 ${testResult.events.length} 个候选事件。${testResult.full_scan?'生成时复用扫描结果':'生成时仍会扫描整段录像'}，应用排除记录后按目标时长精选。`:'按目标时长精选镜头。建议先扫描并核对候选事件，也可直接生成。';
 }
 async function inspect(kind) {
   if (kind === 'music') musicSettings();
@@ -186,13 +211,14 @@ async function inspect(kind) {
 function testFrameControls(busy=!!activeJob) {
   ['test-read-frame','test-prev-frame','test-next-frame','test-frame-time'].forEach(id => $(id).disabled = busy || testFrameBusy || !testResult);
 }
-function setBusy(value) { ['generate','demo','frame','pick-video','pick-music','video','music','profile','threshold','voice-mode','audio-track','game-audio-track','test-profile','test-near-frame','test-start','test-duration'].forEach(id => $(id).disabled = value || calibrationBusy); musicSettings(value); $('cancel').hidden = !value; $('test-cancel').hidden = !value; calibrationControls(); templateControls.forEach(node=>node.disabled=value || calibrationBusy || $('profile').value==='demo'); testFrameControls(value); renderUpdate(); }
+function setBusy(value) { const locked=value || recordingBusy; ['generate','demo','frame','pick-video','pick-music','video','music','profile','threshold','voice-mode','audio-track','game-audio-track','test-profile','test-near-frame','test-start','test-duration','scan-scope'].forEach(id => $(id).disabled = locked || calibrationBusy); musicSettings(locked); $('cancel').hidden = !value || activeJobKind==='profile_test'; $('test-cancel').hidden = !value || activeJobKind!=='profile_test'; calibrationControls(); templateControls.forEach(node=>node.disabled=locked || calibrationBusy || $('profile').value==='demo'); testFrameControls(locked); renderUpdate(); }
 function invalidateTest() {
+  if(recordingMontage && $('video').value.trim()!==recordingMontage.source.path){recordingMontage=null;if($('recording-montage-note'))$('recording-montage-note').hidden=true;$('profile-test-panel').hidden=false;$('strength').disabled=false;}
   testResult = null; testFrameVersion++; testFrameBusy = false;
   excludedEvents.clear();reviewStatus();
   $('test-result').hidden = true; $('test-frame').hidden = true;
   if (activeJobKind !== 'profile_test' || !activeJob) $('test-progress-area').hidden = true;
-  $('test-status').textContent = '录像、配置或测试参数已变更，请重新测试。';
+  $('test-status').textContent = '录像或识别设置已变更，请重新扫描。';
   testFrameControls();
 }
 async function readTestFrame(time) {
@@ -219,9 +245,10 @@ async function readTestFrame(time) {
 function renderTestResult(result) {
   testResult = result; testFrameVersion++; testFrameBusy = false;
   excludedEvents.clear();reviewStatus();
+  const automatic=result.profile==='delta-auto' || autoMode();
   $('test-result').hidden = false; $('test-frame').hidden = true;
-  $('test-status').textContent = result.events.length ? `测试完成，找到 ${result.events.length} 个候选事件。点击事件查看画面。` : '测试完成，未找到候选事件。可查看区间内已知有提示的画面，检查模板、阈值或测试范围后重试。';
-  $('test-summary').textContent = `${result.profile_name} · 阈值 ${result.threshold} · 原片 ${clock(result.start)}–${clock(result.start+result.duration)} · 耗时 ${result.elapsed_seconds.toFixed(2)} 秒${result.duration < result.requested_duration ? ' · 已按片尾缩短' : ''}`;
+  $('test-status').textContent = result.events.length ? `扫描完成，找到 ${result.events.length} 个候选事件。点击事件查看画面。` : automatic?'扫描完成，未找到候选事件。可在已知出现提示的时间查看画面，核对提示是否清晰完整，或切换片段重试。':'扫描完成，未找到候选事件。可查看已知有提示的画面，检查模板、阈值或扫描范围后重试。';
+  $('test-summary').textContent = `${result.profile_name}${automatic?'':` · 阈值 ${result.threshold}`} · 原片 ${clock(result.start)}–${clock(result.start+result.duration)} · 耗时 ${result.elapsed_seconds.toFixed(2)} 秒${result.requested_duration>0 && result.duration < result.requested_duration ? ' · 已按片尾缩短' : ''}`;
   $('test-source').textContent = result.video;
   $('test-events').replaceChildren();
   $('test-events').scrollTop=0;
@@ -229,11 +256,11 @@ function renderTestResult(result) {
     const li = document.createElement('li'), button = document.createElement('button');
     button.type = 'button'; button.className = 'secondary';
     const category=event.classification || 'unknown';
-    button.textContent = `${clock(event.time)}–${clock(event.end)} · ${classLabels[category]}${category==='npc'?' · 自动过滤':''} · 匹配分数 ${event.confidence.toFixed(3)} · 查看画面`;
+    button.textContent = `${clock(event.time)}–${clock(event.end)} · ${classLabels[category]}${category==='npc'?' · 自动过滤':''} · ${automatic?'识别':'匹配'}分数 ${event.confidence.toFixed(3)} · 查看画面`;
     button.addEventListener('click', safe(() => readTestFrame(Math.min(event.time, Math.max(result.start, result.start+result.duration-.1)))));
     li.append(button);
     const evidence=document.createElement('p');evidence.className='hint';
-    evidence.textContent=`${(event.event_types || []).map(t=>typeLabels[t]).join(' / ')} · 图标：${(event.matches || []).map(m=>m.name).join('、') || '旧模板'}。${event.reason || '缺少辅助依据，保留待确认'}${event.evidence?.length?'：'+event.evidence.map(e=>`${e.name} (${e.confidence.toFixed(3)})`).join('、'):''}`;
+    evidence.textContent=`${(event.event_types || []).map(t=>typeLabels[t] || t).join(' / ')} · ${automatic?'提示':'图标'}：${(event.matches || []).map(m=>m.name).join('、') || (automatic?'自动识别':'旧模板')}。${event.reason || '缺少辅助依据，保留待确认'}${event.evidence?.length?'：'+event.evidence.map(e=>`${e.name} (${e.confidence.toFixed(3)})`).join('、'):''}`;
     li.append(evidence);
     if(category!=='npc' && result.review_signature){
       const label=document.createElement('label'), checkbox=document.createElement('input');checkbox.type='checkbox';
@@ -250,7 +277,8 @@ function renderTestResult(result) {
 function renderResult(result) {
   $('empty-preview').hidden = true; $('result-video').hidden = false; $('result-video').src = mediaUrl(result.media_id);
   $('result').hidden = false; $('result-badge').textContent = result.demo ? '合成演示成片' : '已完成';
-  $('stat-duration').textContent = result.duration.toFixed(1); $('stat-clips').textContent = result.clips.length; $('stat-events').textContent = result.events.length;
+  $('stat-duration').textContent = result.duration.toFixed(1); $('stat-clips').textContent = result.clips.length; $('stat-events').textContent = result.candidates?.length ?? result.candidate_count ?? result.events.length+(result.excluded_count || 0); $('stat-filtered').textContent = result.excluded_count || 0;
+  $('result-event-summary').textContent=Number.isFinite(result.selected_event_count)?`实际入选 ${result.selected_event_count} 个事件，整理为 ${result.clips.length} 个镜头。`:'';
   $('warnings').replaceChildren();
   result.warnings.forEach(text => {const li = document.createElement('li');li.textContent = text;$('warnings').append(li);});
   $('download').href = mediaUrl(result.media_id); $('output-path').textContent = result.output;
@@ -265,7 +293,7 @@ async function poll() {
     const prefix = job.kind === 'profile_test' ? 'test-' : '';
     $(prefix+'progress-area').hidden = false;
     $(prefix+'stage').textContent = job.stage; $(prefix+'percent').textContent = `${job.progress}%`; $(prefix+'progress').value = job.progress; $(prefix+'detail').textContent = job.detail || '';
-    if (job.state === 'running') { if(prefix){$('test-status').textContent='正在测试提示配置…';}else{taskReference.textContent=`任务编号：${job.id}`;$('result-badge').textContent='处理中';} timer = setTimeout(poll, 800); return; }
+    if (job.state === 'running') { if(prefix){$('test-status').textContent='正在扫描提示并整理事件…';}else{taskReference.textContent=`任务编号：${job.id}`;$('result-badge').textContent='处理中';} timer = setTimeout(poll, 800); return; }
     activeJob = null; setBusy(false);
     if (job.state === 'failed') { $(prefix ? 'test-status' : 'result-badge').textContent = '处理失败'; const error=new Error(job.error);error.taskId=job.id;showError(error); }
     else if (job.state === 'cancelled') { $(prefix ? 'test-status' : 'result-badge').textContent = '已取消'; }
@@ -287,7 +315,8 @@ $('demo').addEventListener('click', safe(async () => {const job=await api('/api/
 });
 $('music').addEventListener('input',() => { $('music-info').textContent='音乐和录像都保留在本机。'; musicSettings(); });
 $('clear-music').addEventListener('click',() => { $('music').value=''; musicSettings(); });
-$('profile').addEventListener('change', () => {demoNote();invalidateTest();renderTemplates();$('profile-destination').value=$('profile').value==='demo'?'':$('profile').value;calibrationControls();});
+$('profile').addEventListener('change', () => {demoNote();invalidateTest();renderTemplates();$('profile-destination').value=['demo','delta-auto'].includes($('profile').value)?'':$('profile').value;calibrationControls();detectionSettings();});
+$('scan-scope').addEventListener('change',()=>{invalidateTest();detectionSettings();});
 $('profile-destination').addEventListener('change',calibrationControls);
 $('template-role').addEventListener('change',()=>{if($('template-role').value==='trigger' && $('template-type').value==='all')$('template-type').value='kill';calibrationControls();});
 ['mask-mode','mask-cutoff'].forEach(id=>$(id).addEventListener('change',invalidateMask));
@@ -297,27 +326,36 @@ $('voice-mode').addEventListener('change',voiceSettings);
 $('strength').addEventListener('input',() => {$('strength-value').textContent = Number($('strength').value)===0?'关闭':Number($('strength').value)<.4?'轻量':Number($('strength').value)<.8?'适中':'强烈';});
 $('generate').addEventListener('click',safe(async () => {
   if (!$('video').value.trim()) throw new Error('请先选择录像，也可以使用合成演示素材。');
-  if (!$('profile').value) throw new Error('请先选择检测配置，或在“标定提示与辅助标记”中保存配置。');
+  if(!recordingMontage)requireDetection();
   if ($('voice-mode').value==='game_track' && $('game-audio-track').value==='') throw new Error('请先读取录像并手动选择独立游戏音轨。');
   const music=$('music').value.trim();
-  if (($('voice-mode').value==='reduce' || music && $('music-voice-mode').value==='instrumental') && !audioReady) throw new Error('AI 人声组件尚未安装，请查看“声音与高级设置”中的安装提示。');
-  const spec={video:$('video').value,music,profile:$('profile').value,target:$('target').value,music_start:music?$('music-start').value:0,strength:$('strength').value,game_volume:$('game-volume').value,music_volume:music?$('music-volume').value:0,threshold:$('threshold').value,audio_track:$('audio-track').value,encoder:$('encoder').value,voice_mode:$('voice-mode').value,music_voice_mode:music?$('music-voice-mode').value:'keep',game_audio_track:$('game-audio-track').value};
-  if(testResult?.review_signature && excludedEvents.size)spec.review={signature:testResult.review_signature,excluded:[...excludedEvents].map(i=>[testResult.events[i].time,testResult.events[i].end])};
-  const job=await api('/api/generate',spec); $('result').hidden=true; $('result-video').pause(); $('result-video').hidden=true; $('empty-preview').hidden=false; startPolling(job.id,'generate');
+  if (($('voice-mode').value==='reduce' || music && $('music-voice-mode').value==='instrumental') && !audioReady) throw new Error('AI 人声组件尚未安装，请查看“声音与导出设置”中的安装提示。');
+  const spec={video:$('video').value,music,profile:$('profile').value,target:$('target').value,music_start:music?$('music-start').value:0,strength:$('strength').value,game_volume:$('game-volume').value,music_volume:music?$('music-volume').value:0,threshold:autoMode() ? .82 : $('threshold').value,audio_track:$('audio-track').value,encoder:$('encoder').value,voice_mode:$('voice-mode').value,music_voice_mode:music?$('music-voice-mode').value:'keep',game_audio_track:$('game-audio-track').value};
+  if(testResult?.review_signature && excludedEvents.size){
+    const excluded=[...excludedEvents].map(i=>testResult.events[i]);
+    spec.review=testResult.full_scan
+      ? {signature:testResult.review_signature,excluded:[],excluded_ids:excluded.map(event=>event.event_id)}
+      : {signature:testResult.review_signature,excluded:excluded.map(event=>[event.time,event.end])};
+  }
+  const job=recordingMontage
+    ? await api('/api/recording/generate',{session_id:recordingMontage.id,mode:'montage',options:{...spec,effect_preset:$('effect-preset')?.value || undefined}})
+    : await api('/api/generate',spec);
+  $('result').hidden=true; $('result-video').pause(); $('result-video').hidden=true; $('empty-preview').hidden=false; startPolling(job.id,'generate');
 }));
 $('test-profile').addEventListener('click', safe(async () => {
   if (!$('video').value.trim()) throw new Error('请先选择录像。');
-  if (!$('profile').value) throw new Error('请先选择或保存提示配置。');
+  requireDetection();
   const number = (id, label, low, high) => {
     const raw=$(id).value.trim(), value=Number(raw);
     if (!raw || !Number.isFinite(value) || value<low || value>high) throw new Error(`${label}必须在 ${low} 到 ${high} 之间。`);
     return value;
   };
-  const spec={video:$('video').value,profile:$('profile').value,start:number('test-start','测试起点',0,86400*365),duration:number('test-duration','测试时长',5,60),threshold:number('threshold','检测阈值',.5,.99)};
+  const range=$('scan-scope').value==='range';
+  const spec={video:$('video').value,profile:$('profile').value,start:range?number('test-start','片段起点',0,86400*365):0,duration:range?number('test-duration','扫描时长',5,60):0,threshold:autoMode() ? .82 : number('threshold','检测阈值',.5,.99)};
   setBusy(true);
   try {
     const job=await api('/api/test-profile',spec);
-    invalidateTest(); $('test-status').textContent='正在测试提示配置…';
+    invalidateTest(); $('test-status').textContent='正在扫描提示并整理事件…';
     startPolling(job.id,'profile_test');
   } catch(error) {setBusy(false);throw error;}
 }));
@@ -330,7 +368,7 @@ $('test-read-frame').addEventListener('click', safe(() => readTestFrame($('test-
 [['test-prev-frame',-.5],['test-next-frame',.5]].forEach(([id,step]) => $(id).addEventListener('click', safe(() => {
   if(testResult) return readTestFrame(Math.min(Math.max(testResult.start,testResult.start+testResult.duration-.1),Math.max(testResult.start,Number($('test-frame-time').value)+step)));
 })));
-$('test-cancel').addEventListener('click',safe(async () => {if(activeJob && activeJobKind==='profile_test'){await api('/api/cancel',{id:activeJob});$('test-detail').textContent='正在停止测试…';}}));
+$('test-cancel').addEventListener('click',safe(async () => {if(activeJob && activeJobKind==='profile_test'){await api('/api/cancel',{id:activeJob});$('test-detail').textContent='正在停止扫描…';}}));
 $('cancel').addEventListener('click',safe(async () => {if(activeJob){await api('/api/cancel',{id:activeJob});$('detail').textContent='正在停止当前处理…';}}));
 $('open-output').addEventListener('click',safe(() => api('/api/open-output',{})));
 $('download-logs').href=`/api/logs.zip?token=${encodeURIComponent(token)}`;
@@ -366,7 +404,7 @@ $('save-profile').addEventListener('click',safe(async () => {
   calibrationBusy=true;setBusy(!!activeJob);
   try {
     const profile=await api('/api/profile',{...spec,name:$('profile-name').value,profile_id:$('profile-destination').value || null,template_name:$('template-name').value,role:$('template-role').value,event_type:$('template-type').value,sample_threshold:$('template-threshold').value});
-    await refreshProfiles(profile.id);invalidateTest();$('test-start').value=Math.max(0,frameSource.time-5).toFixed(1);$('selection-info').textContent='模板已保存。可继续添加其他图标或辅助标记，再到下方测试。';invalidateMask();
+    await refreshProfiles(profile.id);invalidateTest();$('scan-scope').value='range';detectionSettings();$('test-start').value=Math.max(0,frameSource.time-5).toFixed(1);$('selection-info').textContent='模板已保存。可继续添加样本，或扫描此时间附近的片段验证。';invalidateMask();
   } finally {calibrationBusy=false;setBusy(!!activeJob);}
 }));
 const maskCanvas=$('mask-canvas'), maskContext=maskCanvas.getContext('2d');
@@ -398,9 +436,9 @@ function renderUpdate() {
   $('download-update').hidden = !updateState.supported || state !== 'available';
   $('download-update').disabled = appClosing || pending;
   $('install-update').hidden = state !== 'ready';
-  $('install-update').disabled = appClosing || !!activeJob || calibrationBusy || !desktopMode;
+  $('install-update').disabled = appClosing || !!activeJob || recordingBusy || calibrationBusy || !desktopMode;
   $('quit-app').hidden = !desktopMode;
-  $('quit-app').disabled = appClosing || !!activeJob || calibrationBusy || state === 'installing';
+  $('quit-app').disabled = appClosing || !!activeJob || recordingBusy || calibrationBusy || state === 'installing';
   $('update-progress').hidden = state !== 'downloading';
   $('update-progress').value = Number(updateState.progress) || 0;
   const message = updateState.error || updateState.message || '点击检查更新后才会联网。';
@@ -464,4 +502,4 @@ preferenceIds.forEach(id => $(id).addEventListener('change', async () => {
 logStatus();
 voiceSettings();
 musicSettings();
-safe(async () => {const state=await refreshProfiles();if(state.active)startPolling(state.active);await loadPreferences();await readUpdate();})();
+safe(async () => {const state=await refreshProfiles();if(state.active && !state.active_kind?.startsWith('recording_') && state.active_recording_mode!=='collection')startPolling(state.active);await loadPreferences();await readUpdate();})();

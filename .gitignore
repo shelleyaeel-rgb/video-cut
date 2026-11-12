@@ -4,6 +4,7 @@ build/
 dist/
 work/
 outputs/
+recordings/
 data/
 __pycache__/
 *.py[cod]

@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__, logs
 from .audio_model import status as audio_status
+from .autodetect import status as detection_status
 from .demo import make_demo
 from .detect import list_profiles, save_profile, prepare_template, mask_preview, saved_template_preview, update_template
 from .media import ROOT, Cancelled, Context, local_file, preview_frame, probe, run, tool_path
@@ -48,6 +49,26 @@ class App:
         self.preferences = Preferences()
         self.desktop = False
         self.request_exit = None
+        self.full_scan_cache = None
+        self._recording = None
+
+    @property
+    def recording(self):
+        with self.lock:
+            if self._recording is None:
+                from .recording import RecordingManager
+                self._recording = RecordingManager()
+            return self._recording
+
+    @property
+    def recording_busy(self):
+        return bool(self._recording and self._recording.busy)
+
+    def start_recording(self, options):
+        with self.lock:
+            if self.closing or self.active:
+                raise ValueError('请先完成或取消当前任务后开始录制。')
+            return self.recording.start(options)
 
     def begin_exit(self, update=False):
         with self.lock:
@@ -55,7 +76,7 @@ class App:
                 raise ValueError('请从桌面版使用此操作。')
             if self.closing:
                 raise ValueError('应用正在退出。')
-            if self.active:
+            if self.active or self.recording_busy:
                 raise ValueError('任务正在运行，请等待完成或取消后再退出或更新。')
             self.closing = True
             try:
@@ -79,15 +100,20 @@ class App:
             self.media[ident] = path
             return ident
 
-    def start(self, kind, spec=None):
+    def start(self, kind, spec=None, *, recording_source=None):
         with self.lock:
             if self.closing:
                 raise ValueError('服务正在关闭，请稍后重新启动。')
-            if self.active:
+            if self.active or self.recording_busy:
                 raise ValueError('已有任务正在处理，请等待完成或取消后重试。')
             ident = uuid.uuid4().hex
             self.active = ident
             job = {'id': ident, 'kind': kind, 'state': 'running', 'stage': '准备中', 'progress': 0, 'detail': '', 'result': None, 'error': None}
+            if kind.startswith('recording_'):
+                job['recording_session_id'] = spec.get('session_id')
+            if recording_source is not None:
+                job['recording_session_id'] = recording_source.session_id
+                job['recording_mode'] = recording_source.mode
             self.jobs[ident] = job
 
             def update(stage, progress, detail):
@@ -106,12 +132,26 @@ class App:
                             result = make_demo(ctx)
                         elif kind == 'profile_test':
                             result = test_profile(spec, ctx)
+                        elif kind == 'recording_preview':
+                            from .recording import preview_recording
+                            session = self.recording.store.get_session(spec['session_id'])
+                            result = preview_recording(session, spec['start'], spec['end'], ctx)
+                        elif kind == 'recording_recover':
+                            from .recording import recover_recording
+                            result = recover_recording(self.recording.store, spec['session_id'], ctx)
+                        elif kind == 'recording_rescan':
+                            from .recording import rescan_recording
+                            result = rescan_recording(self.recording.store, spec['session_id'], ctx)
+                        elif recording_source is not None:
+                            result = generate(spec, ctx, ident, recording_source=recording_source)
                         else:
-                            result = generate(spec, ctx, ident)
+                            result = generate(spec, ctx, ident, detection_cache=self.full_scan_cache)
                         ctx.check()
-                        if kind == 'generate':
+                        if kind in ('generate', 'recording_preview'):
                             result['media_id'] = self.register(Path(result['output']))
                         with self.lock:
+                            if kind == 'profile_test' and result.get('full_scan'):
+                                self.full_scan_cache = result
                             job.update(state='complete', progress=100, result=result)
                     except Cancelled as exc:
                         with self.lock:
@@ -153,6 +193,8 @@ class App:
         deadline = time.monotonic() + 5
         for thread in threads:
             thread.join(max(0, deadline-time.monotonic()))
+        if self._recording:
+            self._recording.close()
         remaining = sum(thread.is_alive() for thread in threads)
         logs.event('runtime', 'workers_stopped', remaining=remaining)
 
@@ -253,7 +295,7 @@ def handler_for(app):
                 html = (RESOURCE_ROOT / 'web' / 'index.html').read_text(encoding='utf-8').replace('__SESSION_TOKEN__', app.token)
                 self.send_bytes(html.encode('utf-8'), 'text/html; charset=utf-8')
                 return
-            if parsed.path in ('/app.js', '/style.css'):
+            if parsed.path in ('/app.js', '/recording.js', '/style.css'):
                 file = RESOURCE_ROOT / 'web' / parsed.path[1:]
                 self.send_bytes(file.read_bytes(), 'text/javascript; charset=utf-8' if file.suffix == '.js' else 'text/css; charset=utf-8')
                 return
@@ -261,11 +303,21 @@ def handler_for(app):
                 self.json({'error': '本地会话已失效，请刷新页面。'}, 403)
                 return
             if parsed.path == '/api/state':
-                self.json({'version': __version__, 'profiles': list_profiles(), 'active': app.active, 'output_dir': str(ROOT / 'outputs'), 'data_dir': str(ROOT), 'desktop': app.desktop, 'logs': logs.store().status(), 'audio': audio_status()})
+                self.json({'version': __version__, 'profiles': list_profiles(), 'active': app.active, 'active_kind': app.jobs.get(app.active, {}).get('kind'), 'active_recording_mode': app.jobs.get(app.active, {}).get('recording_mode'), 'output_dir': str(ROOT / 'outputs'), 'data_dir': str(ROOT), 'desktop': app.desktop, 'logs': logs.store().status(), 'audio': audio_status(), 'auto_detection': detection_status()})
             elif parsed.path == '/api/update':
                 self.json(app.updater.status())
             elif parsed.path == '/api/preferences':
                 self.json(app.preferences.get())
+            elif parsed.path == '/api/recording':
+                self.json(app.recording.status())
+            elif parsed.path == '/api/recording/capabilities':
+                self.json(app.recording.capabilities())
+            elif parsed.path == '/api/recording/sources':
+                self.json({'sources': app.recording.sources()})
+            elif parsed.path == '/api/recordings':
+                self.json({'sessions': app.recording.store.list_sessions()})
+            elif parsed.path == '/api/recording/project':
+                self.json(app.recording.store.get_session(query.get('id', [''])[0]))
             elif parsed.path == '/api/job':
                 self.json(app.snapshot(query.get('id', [''])[0]))
             elif parsed.path == '/api/template-image':
@@ -340,7 +392,38 @@ def handler_for(app):
             route = urlparse(self.path).path
             if app.closing:
                 raise ValueError('应用正在退出，请稍后重新打开。')
-            if route == '/api/update/check':
+            if route == '/api/recording/start':
+                self.json(app.start_recording(data), 202)
+            elif route == '/api/recording/stop':
+                self.json(app.recording.stop(), 202)
+            elif route == '/api/recording/mark':
+                self.json(app.recording.manual_marker())
+            elif route == '/api/recording/selection':
+                if app.recording_busy:
+                    raise ValueError('请停止录制后整理片段。')
+                self.json(app.recording.store.update_selection(data.get('session_id'), data.get('selected_ids', []),
+                    expected_revision=data.get('revision'), pre=data.get('pre'), post=data.get('post')))
+            elif route == '/api/recording/add-marker':
+                if app.recording_busy:
+                    raise ValueError('录制中请使用实时标记按钮。')
+                session = app.recording.store.get_session(data.get('session_id'))
+                if session['state'] != 'ready':
+                    raise ValueError('请先恢复或完成录像。')
+                position = float(data.get('time', -1))
+                if not 0 <= position < session['source']['metadata']['duration']:
+                    raise ValueError('标记时间必须位于录像内。')
+                self.json(app.recording.store.upsert_marker(session['id'], {'time': position, 'end': position,
+                    'source': 'manual', 'state': 'confirmed', 'event_types': ['other'], 'confidence': 1., 'reason': '录后手动标记'}))
+            elif route in ('/api/recording/preview', '/api/recording/recover', '/api/recording/rescan'):
+                session = app.recording.store.get_session(data.get('session_id'))
+                kind = 'recording_' + route.rsplit('/', 1)[-1]
+                if kind != 'recording_recover' and session['state'] != 'ready':
+                    raise ValueError('请先停止录制或恢复录像。')
+                self.json(app.start(kind, data), 202)
+            elif route == '/api/recording/generate':
+                spec, source = app.recording.store.build_generation_spec(data.get('session_id'), data.get('options'), mode=data.get('mode', 'collection'))
+                self.json(app.start('generate', spec, recording_source=source), 202)
+            elif route == '/api/update/check':
                 self.json(app.updater.check(), 202)
             elif route == '/api/update/download':
                 self.json(app.updater.download(), 202)
@@ -361,7 +444,7 @@ def handler_for(app):
             elif route == '/api/profile':
                 path = local_file(data.get('video', ''))
                 with app.lock:
-                    if app.active:
+                    if app.active or app.recording_busy:
                         raise ValueError('任务运行中，请完成或取消后修改配置。')
                     result = save_profile(path, float(data.get('time', 0)), data.get('rect', []), data.get('name', ''), .82,
                                           profile_id=data.get('profile_id'), template_name=data.get('template_name', ''),
@@ -376,7 +459,7 @@ def handler_for(app):
                 self.json({'image': 'data:image/png;base64,' + base64.b64encode(mask_preview(template, mask)).decode('ascii')})
             elif route == '/api/template-update':
                 with app.lock:
-                    if app.active:
+                    if app.active or app.recording_busy:
                         raise ValueError('任务运行中，请完成或取消后修改配置。')
                     self.json(update_template(data.get('profile'), data.get('template_id'), data.get('enabled'), data.get('threshold')))
             elif route == '/api/demo':

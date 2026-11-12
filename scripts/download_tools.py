@@ -42,6 +42,15 @@ def packages(mirror=None):
     wheels = []
     if mirror and not mirror.startswith('https://'):
         raise ValueError('The package mirror must use HTTPS.')
+    # Both distributions own cv2; migrate older environments to the OCR runtime's
+    # OpenCV distribution before installing pinned wheels, never leave both.
+    try:
+        importlib.metadata.version('opencv-python-headless')
+    except importlib.metadata.PackageNotFoundError:
+        pass
+    else:
+        subprocess.run([sys.executable, '-m', 'pip', 'uninstall', '-y',
+                        'opencv-python-headless', 'opencv-python'], check=True)
     for requirement in (ROOT/'requirements.txt').read_text().splitlines():
         if not requirement.strip() or requirement.startswith('#'):
             continue

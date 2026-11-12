@@ -59,16 +59,16 @@ class PlanningTests(unittest.TestCase):
             self.assertLessEqual(a['end'], b['start']+.00001)
 
     def test_never_pad_sparse_footage(self):
-        self.assertLess(sum(c['duration'] for c in plan_clips([event(10)],100,90)),5)
+        self.assertAlmostEqual(sum(c['duration'] for c in plan_clips([event(10)],100,90)), 7.6)
 
     def test_numeric_validation(self):
         for n in ('NaN', 'inf', '-1', 121):
             with self.assertRaises(ValueError): finite_number({'target':n},'target',90,5,120)
 
     def test_beat_alignment_keeps_duration_budget(self):
-        clips=plan_clips([event(8),event(18)],30,8,[3.4,7.4])
+        clips=plan_clips([event(8),event(18)],30,8,[4.8,7.4])
         self.assertLessEqual(sum(c['duration'] for c in clips),8)
-        self.assertLess(abs(clips[0]['output_start']+8-clips[0]['start']-3.4),.04)
+        self.assertLess(abs(clips[0]['output_start']+8-clips[0]['start']-4.8),.04)
 
 
 class InputTests(unittest.TestCase):

@@ -95,7 +95,7 @@ class ProfileStorageTests(unittest.TestCase):
         self.assertNotEqual(first['revision'], second['revision'])
         updated = update_template(first['id'], first['templates'][0]['id'], False, .9)
         self.assertFalse(updated['templates'][0]['enabled'])
-        self.assertEqual(len(list_profiles()[0]['templates']), 2)
+        self.assertEqual(len(next(p for p in list_profiles() if p['id'] == first['id'])['templates']), 2)
         with self.assertRaisesRegex(ValueError, '至少启用'):
             update_template(first['id'], second['templates'][1]['id'], False, None)
         self.assertTrue(get_profile(first['id'])['templates'][1]['enabled'])

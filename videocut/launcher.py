@@ -16,7 +16,12 @@ def main(argv=None):
         logs.event('startup', 'startup_started', version=__version__, python=sys.version, executable=sys.executable, platform=platform.platform(), pid=os.getpid())
         try:
             server = importlib.import_module('videocut.server')
-            versions = {name: importlib.metadata.version(name) for name in ('numpy', 'opencv-python-headless')}
+            versions = {}
+            for name in ('numpy', 'opencv-python', 'opencv-python-headless', 'rapidocr-onnxruntime'):
+                try:
+                    versions[name] = importlib.metadata.version(name)
+                except importlib.metadata.PackageNotFoundError:
+                    versions[name] = 'not installed'
             from .media import run, tool_path
             tools = {}
             for name in ('ffmpeg', 'ffprobe'):

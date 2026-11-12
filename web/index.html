@@ -3,39 +3,58 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="session-token" content="__SESSION_TOKEN__">
-  <title>烽火剪辑 · 本地混剪工作台</title>
-  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+  <title>烽火剪辑 · 自动高光剪辑</title>
+  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script src="/recording.js" defer></script>
 </head>
 <body>
 <header class="topbar"><a class="brand" href="/"><span class="brand-mark">▰</span> 烽火剪辑 <small>LOCAL STUDIO</small></a><span class="local"><i></i> 仅在本机处理 <span class="version" id="app-version">正在读取版本</span></span></header>
 <main>
-  <section class="heading"><div class="eyebrow">从完整录像，到你的高光</div><h1>把精彩，剪成你的高光。</h1><p>选录像生成混剪，也可以添加音乐，跟随节拍剪辑。</p><button type="button" class="secondary demo-button" id="demo">没有素材？体验合成演示 <span>↗</span></button></section>
-  <div class="diagnostics"><button type="button" class="secondary" id="open-logs">打开日志文件夹</button><a class="text-button" id="download-logs" download="videocut-logs.zip">下载日志</a><button type="button" class="secondary" id="quit-app" hidden>退出应用</button><span id="log-status" class="hint" role="status">日志保存在本机，报错时可提供错误编号。</span></div>
-  <details class="update-panel"><summary>版本与更新 <span id="update-version" class="hint"></span></summary><div class="update-body">
-    <p id="update-status" class="hint" role="status" aria-live="polite">点击检查更新后才会联网。</p>
-    <progress id="update-progress" max="100" value="0" hidden aria-label="更新下载进度"></progress>
-    <div class="update-actions"><button type="button" class="secondary" id="check-update">检查更新</button><button type="button" class="secondary" id="download-update" hidden>下载新版</button><button type="button" class="primary" id="install-update" hidden>重启安装</button></div>
-    <p id="update-mode" class="hint"></p><p id="data-directory" class="hint path"></p>
-  </div></details>
-  <p id="preferences-status" class="hint preferences-status" role="status">常用剪辑参数会保存在本机。</p>
+  <section class="heading"><div class="eyebrow">三角洲 · 录制与高光</div><h1>录下对局，留下高光。</h1><p>录制时标记精彩瞬间，结束后整理片段，再为高光配上音乐。</p></section>
   <div id="error" class="notice error" role="alert" hidden></div>
+  <nav class="workflow-tabs" aria-label="工作区"><button id="show-recording" class="primary" type="button">录制与高光</button><button id="show-import" class="secondary" type="button">导入录像 / 混剪</button></nav>
+  <section id="recording-workspace">
+    <section class="panel recording-panel" aria-labelledby="recording-title">
+      <div class="recording-heading"><div><div class="panel-title"><span class="step">01</span><h2 id="recording-title">录制三角洲</h2><span class="tag" id="recording-state">检查组件</span></div><p class="hint" id="recording-availability">正在检查本机录制组件…</p></div><output id="recording-clock" class="recording-clock">00:00.0</output></div>
+      <div class="recording-options"><div><label for="capture-source">录制窗口</label><div class="file-row"><select id="capture-source"><option value="">点击刷新，选择游戏窗口</option></select><button id="refresh-capture-sources" class="secondary" type="button">刷新</button></div></div><div><label for="capture-audio">声音</label><select id="capture-audio"><option value="system">系统声音</option><option value="none">静音录制</option></select></div><div><label for="capture-fps">画质</label><select id="capture-fps"><option value="60">1080p · 60 帧</option><option value="30">1080p · 30 帧</option></select></div></div>
+      <label class="check-row"><input type="checkbox" id="capture-detect" checked>录制时自动寻找击倒 / 击败提示</label>
+      <p class="hint">自动标记适用于中文、16:9、默认 HUD 的三角洲提示布局。系统声音包含当前播放设备上的其他应用声音。</p>
+      <div class="recording-actions"><button id="start-recording" class="primary" type="button" disabled>● 开始录制</button><button id="stop-recording" class="danger-button" type="button" disabled>结束录制</button><button id="mark-recording" class="secondary" type="button" disabled>添加标记</button><span id="recording-hotkey" class="hint">录制时可用 Ctrl + Alt + F8 标记</span></div>
+      <div class="recording-metrics"><span>已保存标记 <strong id="recording-marker-count">0</strong></span><span id="recording-detection-state">等待录制</span><span id="recording-health"></span></div>
+      <p id="recording-warning" class="notice" role="status" hidden></p>
+    </section>
+    <div class="recording-library">
+      <section class="panel sessions-panel"><div class="panel-title"><h2>录制记录</h2><button id="refresh-recordings" class="text-button" type="button">刷新</button></div><p class="hint">录像与标记保存在本机，可稍后继续整理。</p><div id="recording-sessions" class="session-list"><p class="hint">还没有录制记录。</p></div></section>
+      <section class="panel recording-project" id="recording-project" hidden>
+        <div class="panel-title"><span class="step">02</span><h2>整理高光</h2><span class="tag" id="project-state"></span></div><p id="project-source" class="hint path"></p><p id="project-summary" class="hint"></p>
+        <div class="project-toolbar"><div><label for="project-pre">标记前 / 秒</label><input id="project-pre" type="number" min="0" max="30" step="0.5" value="5"></div><div><label for="project-post">标记后 / 秒</label><input id="project-post" type="number" min="0" max="30" step="0.5" value="2"></div><button class="secondary" id="save-project-selection" type="button">保存选择</button></div>
+        <p class="hint">原声集锦保留全部勾选片段，自动合并重叠范围；混剪会根据目标时长精选。</p>
+        <div class="project-marker-list" id="project-markers"></div>
+        <div class="manual-marker-row"><label for="project-marker-time">补充标记 / 原片秒数</label><input id="project-marker-time" type="number" min="0" step="0.1" value="0"><button class="secondary" id="add-project-marker" type="button">添加</button></div>
+        <video id="project-preview" controls playsinline hidden></video><p id="project-preview-label" class="hint" role="status"></p>
+        <div class="project-actions"><button id="export-collection" class="primary" type="button">导出原声集锦</button><button id="prepare-montage" class="secondary" type="button">选择音乐与特效 →</button><button id="rescan-recording" class="text-button" type="button">补查整段提示区</button><button id="recover-recording" class="secondary" type="button" hidden>恢复中断录像</button></div>
+        <div id="project-job" hidden><div class="progress-title"><strong id="project-job-stage">准备中</strong><button id="cancel-project-job" class="text-button" type="button">取消</button></div><progress id="project-job-progress" max="100" value="0"></progress><p id="project-job-detail" class="hint" role="status"></p></div>
+        <div id="collection-result" hidden><video id="collection-video" controls playsinline></video><p id="collection-summary" class="hint"></p><a id="download-collection" class="primary" download="highlights.mp4">保存原声集锦 ↓</a></div>
+      </section>
+    </div>
+  </section>
+  <div id="import-workspace" hidden>
+  <p class="notice" id="recording-montage-note" hidden></p>
   <div id="demo-note" class="notice" hidden>当前为合成素材演示：用于验证剪辑流程，不代表三角洲真实识别效果。</div>
   <div class="workspace">
   <section class="settings panel">
-    <div class="panel-title"><span class="step">01</span><h2>准备素材</h2></div>
-    <label for="video">OBS 录像</label><div class="file-row"><input id="video" type="text" placeholder="粘贴完整路径，或点击选择" autocomplete="off"><button id="pick-video" class="secondary" type="button">选择</button></div>
-    <div id="video-info" class="hint">原片保留不变，支持 MP4、MKV 等常见格式。</div>
-    <label for="music">背景音乐（可选）</label><div class="file-row"><input id="music" type="text" placeholder="留空即可生成无 BGM 版本" autocomplete="off" aria-describedby="music-info"><button id="pick-music" class="secondary" type="button">选择</button></div>
-    <div class="music-options"><span id="music-info" class="hint">未添加 BGM，按镜头原有节奏剪辑，保留原声和已开启的效果音。</span><button id="clear-music" class="text-button" type="button" disabled>清空 BGM</button></div>
+    <div class="panel-title"><span class="step">01</span><h2>选择素材</h2></div>
+    <label for="video">游戏录像</label><div class="file-row"><input id="video" type="text" placeholder="粘贴录像路径，或点击选择" autocomplete="off"><button id="pick-video" class="secondary" type="button">选择</button></div>
+    <div id="video-info" class="hint">支持 MP4、MKV，原片保留不变。</div>
+    <label for="music">背景音乐 <span class="optional">可选</span></label><div class="file-row"><input id="music" type="text" placeholder="留空保留原声" autocomplete="off" aria-describedby="music-info"><button id="pick-music" class="secondary" type="button">选择</button></div>
+    <div class="music-options"><span id="music-info" class="hint">未添加 BGM，保留录像原声。</span><button id="clear-music" class="text-button" type="button" disabled>清空</button></div>
     <div class="divider"></div>
-    <div class="panel-title"><span class="step">02</span><h2>设定混剪</h2></div>
-    <label for="profile">游戏提示配置</label><select id="profile"><option value="">首次使用，请在下方标定提示图案</option></select>
-    <p class="hint">一个配置可包含击倒、击杀、爆头和辅助标记。更换 HUD 后需要重新标定。<a class="text-button" href="#profile-test-panel">测试此配置 ↓</a></p>
-    <details class="advanced"><summary>管理当前配置的模板</summary><div id="template-list" class="template-list"><p class="hint">请先选择配置。</p></div></details>
-    <div class="two-cols"><div><label for="target">目标时长 / 秒</label><input type="number" id="target" min="5" max="120" value="90"></div><div><label for="music-start">音乐起点 / 秒</label><input type="number" id="music-start" min="0" step="0.1" value="0" disabled></div></div>
-    <p class="hint">最长 120 秒；素材不足时生成更短的集锦。</p>
+    <h2>成片设置</h2>
+    <label for="target">目标时长 / 秒</label><input type="number" id="target" min="5" max="120" value="90">
+    <p class="hint">按目标时长精选；镜头不足时生成更短的集锦。</p>
+    <label for="effect-preset">特效风格</label><select id="effect-preset"><option value="light">轻量卡点</option><option value="impact">击杀冲击</option><option value="none">干净剪辑</option></select>
     <label for="strength">特效强度 <output id="strength-value">适中</output></label><input id="strength" type="range" min="0" max="1" step="0.1" value="0.5"><div class="range-labels"><span>原片</span><span>放大 · 闪光 · 效果音</span></div>
-    <details class="advanced"><summary>声音与高级设置</summary>
+    <details class="advanced settings-details"><summary>声音与导出设置</summary>
+      <label for="music-start">音乐起点 / 秒</label><input type="number" id="music-start" min="0" step="0.1" value="0" disabled>
       <div class="audio-settings">
         <label for="voice-mode">录像人声</label>
         <select id="voice-mode"><option value="keep">保留人声 · 默认</option><option value="game_track">使用独立游戏音轨 · OBS 已分轨</option><option value="reduce">AI 减弱人声 · 试验功能</option></select>
@@ -49,13 +68,17 @@
         <div class="two-cols"><div><label for="game-volume">原声音量</label><input id="game-volume" type="number" min="0" max="2" step="0.1" value="0.6"></div><div><label for="music-volume">BGM 音量</label><input id="music-volume" type="number" min="0" max="2" step="0.1" value="0.65" disabled></div></div>
       </div>
       <label for="encoder">导出方式</label><select id="encoder"><option value="cpu">CPU · 兼容模式</option><option value="nvenc">NVIDIA · 硬件加速</option></select>
+
+
     </details>
-    <button class="primary generate" id="generate" type="button">生成混剪 <span>→</span></button>
-    <p class="footnote">输出 H.264 MP4 · 最高 1080p / 30 fps</p>
-  </section>
-  <section class="right-column">
-    <section class="panel preview-panel"><div class="preview-title"><h2>成片预览</h2><span id="result-badge" class="tag">等待生成</span></div><div id="empty-preview" class="empty-preview"><span class="play-symbol">▶</span><h3>下一条高光，从这里开始</h3><p>完成左侧设置，或先体验合成演示。</p><div class="preview-bars"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div></div><video id="result-video" controls playsinline hidden></video><div id="progress-area" hidden><div class="progress-title"><strong id="stage">准备中</strong><span id="percent">0%</span></div><progress id="progress" max="100" value="0"></progress><div class="progress-bottom"><span id="detail" class="hint"></span><button type="button" class="text-button" id="cancel">取消任务</button></div></div><div id="result" hidden><div class="result-stats"><div><strong id="stat-duration">—</strong><span>成片秒数</span></div><div><strong id="stat-clips">—</strong><span>入选镜头</span></div><div><strong id="stat-events">—</strong><span>候选事件</span></div></div><ul id="warnings" class="warnings"></ul><div class="result-actions"><a class="primary" id="download" download="montage.mp4">保存成片 ↓</a><button class="secondary" id="open-output" type="button">打开输出文件夹</button></div><div id="output-path" class="hint path"></div><details class="event-details"><summary>查看镜头来源</summary><ol id="clips"></ol></details></div></section>
-    <section class="panel calibration-panel"><details id="calibration"><summary><span><span class="step">03</span> 标定提示与辅助标记</span><span class="muted">多模板 · 背景蒙版</span></summary>
+    <details class="advanced settings-details" id="detection-settings"><summary>识别设置与手动模板</summary>
+      <label for="profile">识别模式</label><select id="profile"><option value="delta-auto">三角洲 · 自动识别</option></select>
+      <p class="hint">默认自动寻找画面提示。已有模板和手动标定可作为补充模式。</p>
+      <div id="manual-settings" hidden>
+        <label for="threshold">模板检测阈值</label><input id="threshold" type="number" min="0.5" max="0.99" step="0.01" value="0.82"><p class="hint">独立样本阈值优先；过高容易漏检，过低容易误检。</p>
+        <details class="advanced"><summary>管理当前配置的模板</summary><div id="template-list" class="template-list"><p class="hint">请先选择配置。</p></div></details>
+      </div>
+    <section class="calibration-panel" id="manual-calibration" hidden><details id="calibration"><summary><span>标定提示与辅助标记</span><span class="muted">多模板 · 背景蒙版</span></summary>
       <div class="calibration-body">
         <p class="hint">先为击倒、普通击杀、爆头分别添加事件图标；同一种图标可添加不同背景的样本。再根据实际录像添加玩家或小兵专属的稳定标记，也可以框选固定文字。</p>
         <label for="profile-destination">保存到</label><select id="profile-destination"><option value="">新建游戏配置</option></select>
@@ -71,27 +94,46 @@
         <button class="secondary" id="save-profile" type="button" disabled>保存模板到配置</button>
       </div>
     </details></section>
+
+    </details>
+    <p id="preferences-status" class="hint preferences-status" role="status">常用剪辑参数保存在本机。</p>
+    <p class="footnote">H.264 MP4 · 最高 1080p / 30 fps</p>
+  </section>
+  <section class="right-column">
     <section class="panel profile-test-panel" id="profile-test-panel" aria-labelledby="test-title">
-      <div class="panel-title"><span class="step">04</span><h2 id="test-title">测试提示配置</h2></div>
-      <p class="hint">使用当前选中的配置，先检查一小段录像。建议同时包含有提示和无提示的画面，核对误检与漏检。仅扫描指定范围，不生成成片或保存画面缓存。</p>
-      <div class="two-cols"><div><label for="test-start">测试起点 / 秒</label><input id="test-start" type="number" min="0" step="0.1" value="0"></div><div><label for="test-duration">测试时长 / 秒</label><input id="test-duration" type="number" min="5" max="60" step="1" value="30"></div></div>
-      <label for="threshold">默认检测阈值（测试与生成共用）</label><input id="threshold" type="number" min="0.5" max="0.99" step="0.01" value="0.82"><p class="hint">设置了独立阈值的样本优先使用自己的值。过高容易漏检，过低容易误检；保存模板后再测试。</p>
-      <div class="test-actions"><button id="test-profile" class="primary" type="button">测试配置</button><button id="test-near-frame" class="secondary" type="button">使用标定时间附近</button></div>
-      <div id="test-progress-area" hidden><div class="progress-title"><strong id="test-stage">准备中</strong><span id="test-percent">0%</span></div><progress id="test-progress" max="100" value="0"></progress><div class="progress-bottom"><span id="test-detail" class="hint"></span><button id="test-cancel" class="text-button" type="button">取消测试</button></div></div>
-      <p id="test-status" class="hint" role="status" aria-live="polite">尚未测试。默认检查 30 秒，最长 60 秒；超过片尾的部分自动缩短。</p>
+      <div class="panel-title"><span class="step">02</span><h2 id="test-title">扫描并预览事件</h2><span id="detection-badge" class="tag">自动识别</span></div>
+      <p id="detection-description" class="hint">全画面寻找击倒、击败提示，自动去重并整理候选事件。</p>
+      <p id="auto-status" class="notice dependency-notice" role="status" hidden></p>
+      <div class="scan-toolbar"><button id="test-profile" class="primary" type="button">扫描整段录像</button><select id="scan-scope" aria-label="扫描范围"><option value="all">整段录像</option><option value="range">指定片段</option></select></div>
+      <div id="scan-range" hidden><div class="two-cols"><div><label for="test-start">片段起点 / 秒</label><input id="test-start" type="number" min="0" step="0.1" value="0"></div><div><label for="test-duration">扫描时长 / 秒</label><input id="test-duration" type="number" min="5" max="60" step="1" value="30"></div></div><button id="test-near-frame" class="text-button" type="button" hidden>使用标定时间附近</button></div>
+      <div id="test-progress-area" hidden><div class="progress-title"><strong id="test-stage">准备中</strong><span id="test-percent">0%</span></div><progress id="test-progress" max="100" value="0"></progress><div class="progress-bottom"><span id="test-detail" class="hint"></span><button id="test-cancel" class="text-button" type="button">取消扫描</button></div></div>
+      <p id="test-status" class="hint" role="status" aria-live="polite">选择录像后开始扫描；长录像可以先选择片段验证。</p>
       <div id="test-result" hidden>
         <p id="test-summary" class="hint"></p><p id="test-source" class="hint path"></p>
-        <p class="hint">匹配分数表示与提示图案的相似程度，不代表击杀准确率。区间边界可能截断提示，必要时向前调整起点。</p>
-        <p class="hint">明确的小兵事件自动过滤，待确认事件默认保留。可手动排除本次测试中的事件，生成时会应用；修改录像、配置或测试参数后清空排除记录。过滤只取消该事件的剪辑触发，它仍可能出现在其他事件的前后片段中。</p><p id="review-status" class="hint" role="status"></p>
-        <ol id="test-events" class="test-events" aria-label="测试识别事件"></ol>
+        <p class="hint"><span id="score-description">识别分数仅作参考，不代表击杀准确率。点击候选事件可查看原片画面。</span></p>
+        <p class="hint">待确认事件默认保留，可勾选排除；有明确小兵依据的事件自动过滤。排除记录用于下一次生成，更换录像或识别设置后清空。</p><p id="review-status" class="hint" role="status"></p>
+        <ol id="test-events" class="test-events" aria-label="候选识别事件"></ol>
         <div class="two-cols"><div><label for="test-frame-time">查看原片画面 / 秒</label><input id="test-frame-time" type="number" min="0" step="0.1" value="0"></div><div class="align-bottom"><button id="test-read-frame" class="secondary" type="button">读取此时画面</button></div></div>
         <div class="test-actions"><button id="test-prev-frame" class="secondary" type="button">前 0.5 秒</button><button id="test-next-frame" class="secondary" type="button">后 0.5 秒</button><span id="test-frame-label" class="hint" role="status"></span></div>
-        <img id="test-frame" class="test-frame" alt="配置测试原片画面" hidden>
+        <img id="test-frame" class="test-frame" alt="候选事件原片画面" hidden>
       </div>
     </section>
-    <p class="prototype-note">当前版本按提示图案寻找候选事件。真实游戏准确率、小时级处理和 RTX 5080 加速待验证。</p>
+
+    <section class="panel preview-panel"><div class="preview-title"><div class="panel-title"><span class="step">03</span><h2>生成混剪</h2></div><span id="result-badge" class="tag">等待生成</span></div><button class="primary generate" id="generate" type="button">生成混剪 <span>→</span></button><p class="hint generation-hint" id="generation-hint">按目标时长精选镜头。建议先扫描并核对候选事件，也可直接生成。</p><div id="empty-preview" class="empty-preview"><span class="play-symbol">▶</span><h3>成片将在这里预览</h3><p>扫描后生成，即可预览并保存。</p><div class="preview-bars"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div></div><video id="result-video" controls playsinline hidden></video><div id="progress-area" hidden><div class="progress-title"><strong id="stage">准备中</strong><span id="percent">0%</span></div><progress id="progress" max="100" value="0"></progress><div class="progress-bottom"><span id="detail" class="hint"></span><button type="button" class="text-button" id="cancel">取消任务</button></div></div><div id="result" hidden><div class="result-stats"><div><strong id="stat-duration">—</strong><span>成片秒数</span></div><div><strong id="stat-clips">—</strong><span>入选镜头</span></div><div><strong id="stat-events">—</strong><span>候选事件</span></div><div><strong id="stat-filtered">—</strong><span>已过滤事件</span></div></div><p id="result-event-summary" class="hint"></p><ul id="warnings" class="warnings"></ul><div class="result-actions"><a class="primary" id="download" download="montage.mp4">保存成片 ↓</a><button class="secondary" id="open-output" type="button">打开输出文件夹</button></div><div id="output-path" class="hint path"></div><details class="event-details"><summary>查看镜头来源</summary><ol id="clips"></ol></details></div></section>
+
   </section>
   </div>
+  </div>
+  <details class="utilities"><summary>工具与应用信息</summary><div class="utilities-body"><button type="button" class="secondary" id="demo">体验合成演示</button>
+  <div class="diagnostics"><button type="button" class="secondary" id="open-logs">打开日志文件夹</button><a class="text-button" id="download-logs" download="videocut-logs.zip">下载日志</a><button type="button" class="secondary" id="quit-app" hidden>退出应用</button><span id="log-status" class="hint" role="status">日志保存在本机，报错时可提供错误编号。</span></div>
+  <details class="update-panel"><summary>版本与更新 <span id="update-version" class="hint"></span></summary><div class="update-body">
+    <p id="update-status" class="hint" role="status" aria-live="polite">点击检查更新后才会联网。</p>
+    <progress id="update-progress" max="100" value="0" hidden aria-label="更新下载进度"></progress>
+    <div class="update-actions"><button type="button" class="secondary" id="check-update">检查更新</button><button type="button" class="secondary" id="download-update" hidden>下载新版</button><button type="button" class="primary" id="install-update" hidden>重启安装</button></div>
+    <p id="update-mode" class="hint"></p><p id="data-directory" class="hint path"></p>
+  </div></details>
+
+  </div></details>
   <footer><span>烽火剪辑 / PERSONAL EDITING WORKSPACE</span><span>你的素材，留在你的电脑。</span></footer>
 </main>
 </body></html>

@@ -23,8 +23,11 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = 'FenghuoClip'
 RUNTIME_PACKAGES = (
-    'numpy', 'opencv-python-headless', 'pywebview', 'pythonnet', 'clr-loader',
+    'numpy', 'opencv-python', 'pywebview', 'pythonnet', 'clr-loader',
     'cffi', 'pycparser', 'proxy-tools', 'bottle', 'typing-extensions',
+    'rapidocr-onnxruntime', 'onnxruntime', 'pyclipper', 'Shapely', 'PyYAML',
+    'Pillow', 'six', 'tqdm', 'colorama', 'coloredlogs', 'flatbuffers', 'protobuf',
+    'sympy', 'humanfriendly', 'mpmath', 'pyreadline3',
 )
 
 
@@ -204,8 +207,10 @@ def main(argv=None):
     if sys.version_info[:2] != (3, 12):
         parser.error('Use CPython 3.12 for this release configuration.')
     ensure_resources()
+    from scripts.download_capture import main as prepare_capture
+    prepare_capture()
     if args.prepare_only:
-        print('FFmpeg and voice model checksums verified.', flush=True)
+        print('FFmpeg, voice model and capture runtime checksums verified.', flush=True)
         return 0
     licenses = ROOT / 'build' / 'licenses'
     collect_license_files(licenses)

@@ -2,17 +2,17 @@
 
 ## 使用
 
-1. 将 `FenghuoClip-0.2.0-windows-x64.zip` 完整解压到你能写入的目录，例如 `D:\Apps`。
+1. 将 `FenghuoClip-0.3.0-windows-x64.zip` 完整解压到你能写入的目录，例如 `D:\Apps`。
 2. 双击其中的 `FenghuoClip\FenghuoClip.exe`。不要单独移动 EXE，也不要把个人文件放到 `FenghuoClip` 程序目录里。
 3. 默认以独立窗口打开。Windows WebView2 不可用时改用系统浏览器；可手动加 `--browser` 强制使用浏览器。
-4. 选素材生成混剪，或先体验合成演示。任务运行期间不能退出或安装更新；先等待完成，或点击取消并等待任务停止。
-5. 使用“退出应用”关闭服务。桌面窗口关闭按钮同样会检查正在运行的任务。
+4. 选择录像，默认自动扫描整段的击倒／击败提示，无需框选；也可先扫描 5–60 秒片段。核对候选并排除误检后生成混剪，音乐可选。完整扫描在本次服务会话内复用；也可直接生成。任务运行期间不能退出或安装更新，先等待或取消任务。
+5. 页面底部“工具与应用信息”包含合成演示、日志、更新及“退出应用”。声音与手动模板在高级设置中。桌面窗口关闭按钮同样会检查正在运行的任务。
 
-支持 Windows x64；包内包含 Python 3.12、NumPy/OpenCV、FFmpeg/ffprobe 和固定的人声模型。NVIDIA 编码依赖目标电脑的驱动和显卡，仍需在游戏电脑实测。包未做 Windows 商业代码签名。
+支持 Windows x64；包内包含 Python 3.12、NumPy/OpenCV、FFmpeg/ffprobe、RapidOCR 中文检测／识别模型及固定的人声模型，运行时不下载依赖。自动识别使用现成 OCR 和提示规则，玩家／小兵默认待确认；并非已训练的三角洲专用模型。NVIDIA 编码依赖目标电脑的驱动和显卡，仍需在游戏电脑实测。包未做 Windows 商业代码签名。
 
 ## 数据与备份
 
-默认数据根目录为 `%LOCALAPPDATA%\FenghuoClip`。页面会显示实际位置。
+默认数据根目录为 `%LOCALAPPDATA%\FenghuoClip`。“工具与应用信息 → 版本与更新”显示实际位置。扫描清单和排除记录只在当前会话使用，重启后需重新扫描。
 
 | 目录/文件 | 内容 |
 | --- | --- |
@@ -28,7 +28,7 @@
 
 ## 检查与安装更新
 
-点击“检查更新”读取固定仓库 `shelleyaeel-rgb/video-cut` 的最新正式 GitHub Release。源码运行模式可以检查版本，但只能免安装版安装更新。
+展开“工具与应用信息 → 版本与更新”，点击“检查更新”读取固定仓库 `shelleyaeel-rgb/video-cut` 的最新正式 GitHub Release。源码运行模式可以检查版本，但只能免安装版安装更新。
 
 发现新版后点击下载。程序核验发布清单中的文件名、版本、大小与 SHA-256，再验证 ZIP 的路径和目录结构。准备完成后，等待任务结束，再点击“重启安装”。独立更新程序等待旧进程退出，将旧版备份、换入新版并重新启动；新版未在规定时间内就绪时尝试恢复旧版。更新结果在页面可见，诊断日志留在程序目录旁的 `.FenghuoClip-update-*` 目录。安装器失败或文件正被占用时，勿手工删除其中的 `previous`，它可能保存待恢复的原程序。
 
@@ -51,7 +51,9 @@ SHA-256 用于完整性校验，更新信任来源是固定 GitHub 仓库和 HTT
 .\.venv\Scripts\python.exe scripts\build_windows.py
 ```
 
-构建脚本校验固定 FFmpeg 和模型资源，收集第三方许可，运行 PyInstaller，执行冻结版自检，再生成：
+构建使用 `requirements.txt` 中固定的运行依赖。ONNX Runtime 固定为 1.20.1；本机 1.22.1 曾发生 DLL 加载失败。OpenCV 统一使用 `opencv-python`，不要与 `opencv-python-headless` 并装；从旧环境升级时使用在线 `scripts/setup.ps1` 迁移依赖。
+
+构建脚本校验固定 FFmpeg 和模型资源，将 RapidOCR 的中文 ONNX 模型与 ONNX Runtime 一并收集，收集第三方许可，运行 PyInstaller，执行冻结版自检，再生成：
 
 - `dist/FenghuoClip/`：可运行目录。
 - `dist/FenghuoClip-<版本>-windows-x64.zip`：完整分发包。
@@ -61,14 +63,14 @@ SHA-256 用于完整性校验，更新信任来源是固定 GitHub 仓库和 HTT
 自检在临时目录生成合成视频和混剪并全片解码，不读取用户录像。可加测冻结后的 AI 子进程：
 
 ```powershell
-Start-Process -Wait .\dist\FenghuoClip\FenghuoClip.exe -ArgumentList '--self-test-ai','--result','D:\Apps\fenghuo-test.json'
+Start-Process -WindowStyle Hidden -Wait .\dist\FenghuoClip\FenghuoClip.exe -ArgumentList '--self-test-ai','--result','D:\Apps\fenghuo-test.json'
 ```
 
 自检不是干净 Windows 安装、实际游戏识别效果、RTX 编码性能或实际互联网升级的验证。
 
 ## 仓库与版本发布
 
-`.github/workflows/release.yml` 支持手动构建及 `v*` 标签。标签必须和 `videocut/__init__.py` 中的版本号一致，例如 `v0.2.0`。
+`.github/workflows/release.yml` 支持手动构建及 `v*` 标签。标签必须和 `videocut/__init__.py` 中的版本号一致，例如 `v0.3.0`。
 
 1. 提交并推送源码，递增版本号后创建对应标签。
 2. 工作流在 Windows 上测试、打包、自检，并上传构建产物；标签构建另外准备一个草稿 Release。

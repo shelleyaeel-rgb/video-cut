@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 
 
@@ -23,7 +24,11 @@ def review_exclusions(spec, video, profile, threshold):
     excluded = review.get('excluded', [])
     if not isinstance(excluded, list) or len(excluded) > 500:
         raise ValueError('手动排除记录无效。')
-    result = []
+    excluded_ids = review.get('excluded_ids', [])
+    if (not isinstance(excluded_ids, list) or len(excluded_ids) + len(excluded) > 500
+            or any(not isinstance(ident, str) or re.fullmatch(r'[0-9a-f]{64}', ident) is None for ident in excluded_ids)):
+        raise ValueError('手动排除事件标识无效。')
+    result = [{'event_id': ident} for ident in dict.fromkeys(excluded_ids)]
     for span in excluded:
         if not isinstance(span, list) or len(span) != 2:
             raise ValueError('手动排除时间范围无效。')

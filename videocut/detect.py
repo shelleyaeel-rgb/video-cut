@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import threading
@@ -16,6 +17,14 @@ PROFILES = ROOT / 'data' / 'profiles'
 PROFILE_LOCK = threading.RLock()
 EVENT_TYPES = {'knockdown', 'kill', 'headshot', 'other'}
 ROLES = {'trigger', 'player', 'npc'}
+AUTO_PROFILE_ID = 'delta-auto'
+
+
+def automatic_profile():
+    # Built in and immutable: no user template or calibration file is needed.
+    return {'id': AUTO_PROFILE_ID, 'name': '三角洲 · 自动识别', 'kind': 'delta_auto',
+            'revision': 'delta-ocr-1', 'templates': [], 'threshold': .82,
+            'source_note': '本地识别击倒 / 击败提示，无需手动框选'}
 
 
 def prepare_template(video, time, rect, mask_mode='edges', cutoff=180, erase=()):
@@ -101,8 +110,8 @@ def save_profile(video, time, rect, name, threshold=.82, *, profile_id=None, tem
     with PROFILE_LOCK:
         if profile_id:
             config = get_profile(profile_id)
-            if config.get('kind') == 'demo':
-                raise ValueError('请新建游戏配置，合成演示配置不支持修改。')
+            if config.get('kind') in {'demo', 'delta_auto'}:
+                raise ValueError('内置识别模式不支持添加模板，请新建手动配置。')
             if config['reference_size'] != size:
                 raise ValueError('画面比例与已有配置不同，请新建配置。')
             config['templates'] = profile_templates(config)
@@ -135,8 +144,8 @@ def update_template(ident, template_id, enabled, threshold):
     threshold = _threshold(threshold)
     with PROFILE_LOCK:
         config = get_profile(ident)
-        if config.get('kind') == 'demo':
-            raise ValueError('合成演示配置不支持修改。')
+        if config.get('kind') in {'demo', 'delta_auto'}:
+            raise ValueError('内置识别模式不支持修改模板。')
         config['templates'] = profile_templates(config)
         item = next((t for t in config['templates'] if t['id'] == template_id), None)
         if item is None:
@@ -150,6 +159,8 @@ def update_template(ident, template_id, enabled, threshold):
 
 
 def get_profile(ident):
+    if ident == AUTO_PROFILE_ID:
+        return automatic_profile()
     if not isinstance(ident, str) or not ident or any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789_-' for c in ident):
         raise ValueError('检测配置无效。')
     path = PROFILES / ident / 'profile.json'
@@ -159,10 +170,12 @@ def get_profile(ident):
 
 
 def list_profiles():
-    result = []
+    result = [automatic_profile()]
     for path in PROFILES.glob('*/profile.json'):
         try:
             item = json.loads(path.read_text(encoding='utf-8'))
+            if item.get('id') == AUTO_PROFILE_ID:
+                continue
             result.append({**{k: item[k] for k in ('id', 'name', 'kind')}, 'templates': profile_templates(item)})
         except (ValueError, KeyError) as exc:
             logs.failure('runtime', 'profile_skipped', exc, path=str(path))
@@ -312,19 +325,68 @@ def combine_detections(templates, score_tracks, fps, threshold, rearm=.35, min_v
     return groups
 
 
-def select_events(events, excluded=()):
-    """Keep unknowns. Manual exclusions apply only to the reviewed time spans."""
-    selected = []
+def tag_event_ids(events):
+    """Stable identities for a reviewed scan, independent of mutable selection."""
+    occurrences = {}
     for event in events:
-        manual = any(event['time'] <= end+.125 and event['end'] >= begin-.125 for begin, end in excluded)
-        event['included'] = event.get('classification') != 'npc' and not manual
-        event['exclusion_reason'] = '手动排除' if manual else '小兵辅助规则' if not event['included'] else None
+        identity = {
+            'time': round(float(event['time']), 6),
+            'end': round(float(event['end']), 6),
+            'types': sorted(event.get('event_types', [])),
+            'matches': sorted((str(item.get('id', '')), str(item.get('name', '')))
+                              for item in event.get('matches', [])),
+            'boxes': sorted(tuple(item['box']) for item in event.get('evidence', []) if 'box' in item),
+        }
+        payload = json.dumps(identity, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+        occurrence = occurrences.get(payload, 0)
+        occurrences[payload] = occurrence + 1
+        event['event_id'] = hashlib.sha256(f'{payload}:{occurrence}'.encode('utf-8')).hexdigest()
+    return events
+
+
+def select_events(events, excluded=()):
+    """Exclude one reviewed event per identity or uniquely matching legacy span."""
+    manual = set()
+    for exclusion in excluded:
+        if isinstance(exclusion, dict):
+            ident = exclusion.get('event_id')
+            matches = [i for i, event in enumerate(events) if ident and event.get('event_id') == ident]
+            if len(matches) != 1:
+                raise ValueError('手动排除的事件不存在或不唯一，请重新扫描后确认。')
+            manual.add(matches[0])
+            continue
+        begin, end = exclusion
+        matches = []
+        for index, event in enumerate(events):
+            first, last = event['time'], event['end']
+            if first > end + .125 or last < begin - .125:
+                continue
+            # Partial scans may begin/end inside a prompt. Prefer the strongest
+            # temporal match, and refuse ties rather than deleting both cues.
+            intersection = max(0., min(last, end) - max(first, begin))
+            union = max(last, end) - min(first, begin)
+            overlap = intersection / union if union > 0 else 1.
+            distance = abs(first - begin) + abs(last - end)
+            matches.append((overlap, -distance, index))
+        matches.sort(reverse=True)
+        if not matches:
+            raise ValueError('手动排除的时间段未找到对应事件，请重新扫描后确认。')
+        if (len(matches) > 1 and abs(matches[0][0] - matches[1][0]) < 1e-6
+                and abs(matches[0][1] - matches[1][1]) < 1e-6):
+            raise ValueError('手动排除的时间段对应多个事件，请使用整段扫描后逐个排除。')
+        manual.add(matches[0][2])
+    selected = []
+    for index, event in enumerate(events):
+        event['included'] = event.get('classification') != 'npc' and index not in manual
+        event['exclusion_reason'] = '手动排除' if index in manual else '小兵辅助规则' if not event['included'] else None
         if event['included']:
             selected.append(event)
     return selected
 
-
 def detect_events(video, profile, ctx=None, threshold=None, *, start=0., duration=None, progress=(5, 47)):
+    if profile.get('kind') == 'delta_auto':
+        from .autodetect import detect_auto_events
+        return tag_event_ids(detect_auto_events(video, ctx, start=start, duration=duration, progress=progress))
     ctx = ctx or Context()
     meta = probe(video, ctx)
     if not math.isfinite(start) or start < 0 or start >= meta['duration']:
@@ -402,4 +464,4 @@ def detect_events(video, profile, ctx=None, threshold=None, *, start=0., duratio
         event['time'] += start
         event['end'] += start
     ctx.record('detection_complete', frames=frames, candidate_count=len(events), template_count=len(templates), profile=profile['id'], start=start, duration=scan_duration)
-    return events
+    return tag_event_ids(events)

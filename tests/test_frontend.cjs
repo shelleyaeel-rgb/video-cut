@@ -7,10 +7,10 @@ const {randomUUID} = require('node:crypto');
 const code = fs.readFileSync(require('node:path').join(__dirname,'../web/app.js'),'utf8');
 const settle = async () => {await new Promise(setImmediate);await new Promise(setImmediate);};
 
-function page({storage=new Map(),online=true,serverFailure=false,audioReady=true,token='private-session-token',onRequest,desktop=false,preferences={},update={state:'idle',supported:false}}={}) {
+function page({storage=new Map(),online=true,serverFailure=false,audioReady=true,token='private-session-token',onRequest,desktop=false,preferences={},update={state:'idle',supported:false},profiles=[{id:'delta-auto',name:'三角洲 · 自动识别',kind:'delta_auto',templates:[]}],autoDetection={available:true}}={}) {
   const nodes=new Map(), events={}, reports=[], requests=[];
   function node(id) {
-    if (!nodes.has(id)) nodes.set(id,{value:['voice-mode','music-voice-mode'].includes(id)?'keep':'',textContent:'',hidden:true,handlers:{},children:[],addEventListener(name,fn){this.handlers[name]=fn;},getContext(){return {};},append(child){this.children.push(child);},after(){},replaceChildren(){this.children=[];},add(){},pause(){}});
+    if (!nodes.has(id)) nodes.set(id,{value:['voice-mode','music-voice-mode'].includes(id)?'keep':id==='scan-scope'?'all':'',textContent:'',hidden:true,handlers:{},children:[],addEventListener(name,fn){this.handlers[name]=fn;},getContext(){return {};},append(child){this.children.push(child);},after(){},replaceChildren(){this.children=[];},add(child){this.children.push(child);},pause(){}});
     return nodes.get(id);
   }
   const response = (body,status=200) => ({status,ok:status<400,json:async()=>body});
@@ -18,11 +18,11 @@ function page({storage=new Map(),online=true,serverFailure=false,audioReady=true
     document:{getElementById:node,querySelector:()=>({content:token}),createElement:()=>node(randomUUID()),createTextNode:text=>({textContent:text})},
     window:{addEventListener:(name,fn)=>events[name]=fn},
     sessionStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},
-    crypto:{randomUUID},Option:function(){},setInterval(){},setTimeout,clearTimeout,AbortSignal,
+    crypto:{randomUUID},Option:function(text,value){this.textContent=text;this.value=value;},setInterval(){},setTimeout,clearTimeout,AbortSignal,
     fetch:async(path,options)=>{
       if (!online) throw new Error('offline');
       requests.push({path,body:options?.body?JSON.parse(options.body):null});
-      if (path==='/api/state') return response({profiles:[],active:null,version:'0.2.0',desktop,data_dir:'C:/local-data',logs:{write_error:false},audio:{ready:audioReady}});
+      if (path==='/api/state') return response({profiles,auto_detection:autoDetection,active:null,version:'0.2.0',desktop,data_dir:'C:/local-data',logs:{write_error:false},audio:{ready:audioReady}});
       if (path==='/api/update') return response(update);
       if (path==='/api/preferences') {if(options.body)Object.assign(preferences,JSON.parse(options.body));return response(preferences);}
       if (path==='/api/client-error') {reports.push(JSON.parse(options.body));return response({ok:true,logs:{write_error:false}});}
@@ -192,7 +192,7 @@ function profileResult(events=[]) {
   return {video:'test.mp4',profile:'demo',profile_name:'测试模板',threshold:.82,start:8,duration:8,requested_duration:8,events,elapsed_seconds:.2};
 }
 function fillProfileTest(p) {
-  for(const [id,value] of Object.entries({video:'test.mp4',profile:'demo','test-start':'8','test-duration':'8',threshold:'.82'})) p.node(id).value=value;
+  for(const [id,value] of Object.entries({video:'test.mp4',profile:'demo','scan-scope':'range','test-start':'8','test-duration':'8',threshold:'.82'})) p.node(id).value=value;
 }
 
 test('profile testing ignores music and AI settings, shows empty results, and preserves montage',async()=>{
@@ -214,7 +214,7 @@ test('profile testing ignores music and AI settings, shows empty results, and pr
 test('profile test rejects invalid duration before submitting',async()=>{
   const p=page();await settle();fillProfileTest(p);p.node('test-duration').value='600';
   await p.node('test-profile').handlers.click();await settle();
-  assert.match(p.node('error').textContent,/测试时长/);
+  assert.match(p.node('error').textContent,/扫描时长/);
   assert.ok(!p.requests.some(r=>r.path==='/api/test-profile'));
 });
 
@@ -232,7 +232,7 @@ test('event preview uses source time and stale frame responses cannot restore in
   p.node('threshold').value='.9';p.node('threshold').handlers.input();
   resolveFrame({image:'data:image/png;base64,old'});await click;await settle();
   assert.equal(p.node('test-result').hidden,true);assert.equal(p.node('test-frame').hidden,true);
-  assert.match(p.node('test-status').textContent,/重新测试/);
+  assert.match(p.node('test-status').textContent,/重新扫描/);
 });
 
 test('classification evidence and manual exclusions are sent to generation and cleared on changes',async()=>{
@@ -259,4 +259,85 @@ test('classification evidence and manual exclusions are sent to generation and c
   await p.node('generate').handlers.click();await settle();
   assert.equal(p.requests.filter(r=>r.path==='/api/generate').at(-1).body.review,undefined);
   assert.match(p.node('review-status').textContent,/排除 0/);
+});
+
+test('automatic mode is selected by default without exposing template calibration',async()=>{
+  const p=page({profiles:[{id:'delta-auto',name:'三角洲 · 自动识别',kind:'delta_auto',templates:[]},{id:'manual',name:'旧模板',kind:'template',templates:[]}]});await settle();
+  assert.equal(p.node('profile').value,'delta-auto');
+  assert.equal(p.node('manual-settings').hidden,true);
+  assert.equal(p.node('manual-calibration').hidden,true);
+  assert.equal(p.node('scan-range').hidden,true);
+  assert.equal(p.node('test-profile').textContent,'扫描整段录像');
+  assert.ok(!p.node('profile-destination').children.some(option=>option.value==='delta-auto'));
+  p.node('profile').value='manual';p.node('profile').handlers.change();
+  assert.equal(p.node('manual-settings').hidden,false);
+  assert.equal(p.node('manual-calibration').hidden,false);
+  assert.match(p.node('score-description').textContent,/模板相似度/);
+});
+
+test('automatic dependency errors explain the cause and stop scan and export',async()=>{
+  const p=page({autoDetection:{available:false,reason:'未安装 OCR 组件'}});await settle();p.node('video').value='test.mp4';
+  assert.equal(p.node('auto-status').hidden,false);
+  assert.match(p.node('auto-status').textContent,/未安装 OCR/);
+  await p.node('test-profile').handlers.click();await p.node('generate').handlers.click();await settle();
+  assert.match(p.node('error').textContent,/未安装 OCR/);
+  assert.ok(!p.requests.some(r=>['/api/test-profile','/api/generate'].includes(r.path)));
+});
+
+test('whole-video automatic scan ignores stale range and template threshold values',async()=>{
+  const result={...profileResult([{time:10,end:10.5,confidence:.98,event_types:['kill']}]),profile:'delta-auto',profile_name:'三角洲 · 自动识别',start:0,duration:120,requested_duration:0,review_signature:'automatic-review',full_scan:true};
+  const p=page({onRequest:async path=>{
+    if(path==='/api/test-profile')return {id:'scan-job'};
+    if(path.startsWith('/api/job'))return {kind:'profile_test',state:'complete',progress:100,result};
+    throw new Error(path);
+  }});await settle();p.node('video').value='test.mp4';p.node('threshold').value='invalid';p.node('test-duration').value='999';p.node('test-start').value='invalid';
+  await p.node('test-profile').handlers.click();await settle();
+  assert.deepEqual(p.requests.find(r=>r.path==='/api/test-profile').body,{video:'test.mp4',profile:'delta-auto',start:0,duration:0,threshold:.82});
+  assert.match(p.node('test-status').textContent,/找到 1 个候选事件/);
+  assert.doesNotMatch(p.node('test-summary').textContent,/阈值/);
+  assert.match(p.node('test-events').children[0].children[0].textContent,/识别分数/);
+  assert.match(p.node('review-status').textContent,/候选 1.*保留 1/);
+  p.node('scan-scope').value='range';p.node('scan-scope').handlers.change();
+  assert.equal(p.node('scan-range').hidden,false);
+  assert.equal(p.node('test-result').hidden,true);
+  assert.equal(p.node('test-profile').textContent,'扫描此片段');
+});
+
+test('automatic mode can generate directly and uses a stable review threshold',async()=>{
+  const p=page({serverFailure:true});await settle();p.node('video').value='test.mp4';p.node('threshold').value='.99';
+  await p.node('generate').handlers.click();await settle();
+  const sent=p.requests.find(r=>r.path==='/api/generate').body;
+  assert.equal(sent.profile,'delta-auto');assert.equal(sent.threshold,.82);
+  assert.ok(!p.requests.some(r=>r.path==='/api/test-profile'));
+});
+
+test('whole-video review excludes overlapping events by stable identity rather than time span',async()=>{
+  const result={...profileResult([
+    {event_id:'knockdown-one',time:10,end:11,confidence:.98,event_types:['knockdown']},
+    {event_id:'kill-two',time:10,end:11,confidence:.96,event_types:['kill']}
+  ]),profile:'delta-auto',profile_name:'三角洲 · 自动识别',start:0,duration:120,requested_duration:0,review_signature:'full-review',full_scan:true};
+  const p=page({serverFailure:true,onRequest:async path=>{
+    if(path==='/api/test-profile')return {id:'scan-job'};
+    if(path.startsWith('/api/job'))return {kind:'profile_test',state:'complete',progress:100,result};
+    throw new Error(path);
+  }});await settle();p.node('video').value='test.mp4';
+  await p.node('test-profile').handlers.click();await settle();
+  const checkbox=p.node('test-events').children[1].children[2].children[0];
+  checkbox.checked=true;checkbox.handlers.change();
+  await p.node('generate').handlers.click();await settle();
+  assert.deepEqual(p.requests.find(r=>r.path==='/api/generate').body.review,{signature:'full-review',excluded:[],excluded_ids:['kill-two']});
+});
+
+test('montage metrics distinguish candidates, exclusions, selected events and merged clips',async()=>{
+  const result={duration:12,media_id:'output-id',output:'out.mp4',events:[{time:10},{time:12},{time:40}],candidate_count:5,excluded_count:2,selected_event_count:2,clips:[{start:5,end:17,output_start:0,events:[{time:10},{time:12}]}],warnings:[]};
+  const p=page({onRequest:async path=>{
+    if(path==='/api/generate')return {id:'export-job'};
+    if(path.startsWith('/api/job'))return {kind:'generate',state:'complete',progress:100,result};
+    throw new Error(path);
+  }});await settle();p.node('video').value='test.mp4';
+  await p.node('generate').handlers.click();await settle();
+  assert.equal(p.node('stat-events').textContent,5);
+  assert.equal(p.node('stat-filtered').textContent,2);
+  assert.equal(p.node('stat-clips').textContent,1);
+  assert.match(p.node('result-event-summary').textContent,/入选 2 个事件.*1 个镜头/);
 });

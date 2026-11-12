@@ -57,6 +57,7 @@ def _self_test(ai=False):
     import urllib.request
     from . import __version__
     from .audio_model import require_model
+    from .autodetect import _engine, status as detection_status
     from .demo import make_demo
     from .media import Context, probe, run, tool_path
     from .paths import DATA_ROOT, RESOURCE_ROOT, worker_command
@@ -65,6 +66,25 @@ def _self_test(ai=False):
     from . import logs
     require_model(verify=True)
     report = {'version': __version__, 'data_dir': str(DATA_ROOT), 'resources': str(RESOURCE_ROOT)}
+    import numpy as np
+    _engine(Context())(np.zeros((96, 320, 3), dtype=np.uint8), use_cls=False)
+    report['automatic_detection'] = detection_status()
+    from .capture_backend import backend_status, list_capture_devices
+    report['capture'] = backend_status()
+    if not report['capture']['available']:
+        raise RuntimeError(report['capture']['reason'])
+    devices = list_capture_devices()
+    report['capture']['source_count'] = len(devices['sources'])
+    from .realtime import Detector
+    detector = Detector().start()
+    try:
+        detector.push(np.zeros((540, 960, 3), dtype=np.uint8), 0.)
+        detector_report = detector.stop(timeout=15)
+        if detector_report.get('state') in ('failed', 'needs_rescan'):
+            raise RuntimeError('Frozen detection worker failed: ' + str(detector_report))
+        report['realtime_worker'] = detector_report.get('state')
+    finally:
+        detector.stop(timeout=2)
     report['ffmpeg'] = run([tool_path('ffmpeg'), '-version'], timeout=15).decode(errors='replace').splitlines()[0]
     app = App()
     server = LocalHTTPServer(('127.0.0.1', 0), handler_for(app))
@@ -135,8 +155,8 @@ def _run_window(args):
 
                 def closing(*unused):
                     with app.lock:
-                        if app.active:
-                            message('任务仍在处理中。请等待完成，或先在页面取消任务后再退出。')
+                        if app.active or app.recording_busy:
+                            message('任务仍在处理中。请先结束录制，或等待/取消剪辑任务后再退出。')
                             return False
                         app.closing = True
                     return True
@@ -165,6 +185,8 @@ def _run_window(args):
 
 
 def main(argv=None):
+    import multiprocessing
+    multiprocessing.freeze_support()
     args_list = list(sys.argv[1:] if argv is None else argv)
     # Windowed PyInstaller intentionally gives us no console streams. Worker
     # results use files, while exceptions are recorded by the desktop logger.

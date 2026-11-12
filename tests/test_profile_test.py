@@ -18,7 +18,7 @@ class ProfileTestTests(unittest.TestCase):
         self.addCleanup(self.local.stop); self.addCleanup(self.profile_patch.stop)
 
     def test_rejects_unbounded_and_nonfinite_inputs(self):
-        for field, values in {'duration': [0, 4, 61, 'NaN', 'inf', None], 'start': [-1, 'NaN', 'inf'], 'threshold': [.49, 1, 'NaN']}.items():
+        for field, values in {'duration': [-1, 4, 61, 'NaN', 'inf', None], 'start': [-1, 'NaN', 'inf'], 'threshold': [.49, 1, 'NaN']}.items():
             for value in values:
                 with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                     validate_profile_test({field: value})
@@ -33,12 +33,27 @@ class ProfileTestTests(unittest.TestCase):
         detect.assert_called_once_with(Path('test.mp4'), self.profile, ctx, .82, start=22, duration=2, progress=(5, 98))
         self.assertEqual(ctx.stage, '配置测试完成')
 
+    def test_full_scan_and_partial_range_are_distinguished(self):
+        with patch('videocut.profile_test.probe', return_value=self.meta), patch('videocut.profile_test.detect_events', return_value=[]):
+            full = test_profile({'duration': 0})
+            partial = test_profile({'start': 10, 'duration': 0})
+        self.assertTrue(full['full_scan'])
+        self.assertEqual(full['duration'], 24)
+        self.assertEqual(full['requested_duration'], 0)
+        self.assertFalse(partial['full_scan'])
+        self.assertEqual(partial['duration'], 14)
+
     def test_rejects_start_at_or_after_eof_without_scanning(self):
         with patch('videocut.profile_test.probe', return_value=self.meta), patch('videocut.profile_test.detect_events') as detect:
             for start in (24, 25):
                 with self.assertRaisesRegex(ValueError, '末尾'):
                     test_profile({'start': start})
             detect.assert_not_called()
+
+    def test_changed_source_cannot_be_cached_as_a_complete_scan(self):
+        with patch('videocut.profile_test.probe', return_value=self.meta), patch('videocut.profile_test.detect_events', return_value=[]), patch('videocut.profile_test.review_signature', side_effect=['before', 'after']):
+            with self.assertRaisesRegex(ValueError, '发生变化'):
+                test_profile({'duration': 0})
 
     def test_cancelled_test_never_starts_scan(self):
         ctx = Context(); ctx.cancel()
